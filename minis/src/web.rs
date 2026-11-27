@@ -150,13 +150,13 @@ pub fn choose_certificate_mode() -> Option<CertificateMode> {
     certificate_mode_for_selection(selected)
 }
 
-const CERTIFICATE_MODE_HELP: &str = "Signing mode. The Developer Portal exposes only the public certificate; signing needs its matching private key. Existing-only uses a key already stored by siboot. It can still register this device/app and request a profile.";
+const CERTIFICATE_MODE_HELP: &str = "เลือกวิธีลงนาม: พอร์ทัลของ Apple แสดงเฉพาะใบรับรองสาธารณะ การลงนามต้องมี private key ที่คู่กัน โหมดใช้คีย์เดิมจะใช้คีย์ที่ siboot เก็บไว้แล้ว และยังอาจลงทะเบียนอุปกรณ์/App ID และขอโปรไฟล์จาก Apple";
 
 fn certificate_mode_options() -> Vec<String> {
     vec![
-        "Automatic certificate handling (may request one; prompts before revoking)".to_string(),
-        "Existing siboot key only (never create or revoke a certificate)".to_string(),
-        "Use my own .p12 certificate (choose a file, sign with its key)".to_string(),
+        "จัดการใบรับรองอัตโนมัติ (อาจขอใหม่ ถ้าถึงขีดจำกัดจะถามก่อนเพิกถอน)".to_string(),
+        "ใช้เฉพาะคีย์เดิมของ siboot (ไม่สร้าง/ไม่เพิกถอนใบรับรอง)".to_string(),
+        "ใช้ใบรับรอง .p12 ของฉันเอง (เลือกไฟล์ แล้วลงนามด้วยคีย์นั้น)".to_string(),
     ]
 }
 
@@ -414,7 +414,7 @@ impl Server {
     pub fn choose_ipa(&self) -> Option<UploadedIpa> {
         let answer = self.ask(json!({
             "kind": "ipa",
-            "question": "Choose an IPA you trust. It will be signed with your Apple Account and installed on this iPhone.",
+            "question": "เลือก IPA ที่คุณไว้วางใจ ระบบจะลงนามด้วยบัญชี Apple ของคุณ แล้วติดตั้งลงเครื่องนี้",
         }));
         if let Some(id) = answer["id"].as_u64() {
             self.discard_upload(id);
@@ -431,11 +431,11 @@ impl Server {
     /// Ask which IPA to install: a known signer release, or the user's own.
     pub fn choose_ipa_source(&self) -> Option<IpaChoice> {
         let options = vec![
-            "ESign — download its latest signer IPA".to_string(),
-            "Ksign — download its latest signer IPA".to_string(),
-            "Choose an .ipa from Files".to_string(),
+            "ESign — ดาวน์โหลดตัวลงนามเวอร์ชันล่าสุด".to_string(),
+            "Ksign — ดาวน์โหลดตัวลงนามเวอร์ชันล่าสุด".to_string(),
+            "เลือกไฟล์ .ipa จาก Files".to_string(),
         ];
-        let index = self.choose("Install an app. Pick a signer to download, or choose your own IPA from Files.", &options)?;
+        let index = self.choose("เลือกแอปที่จะติดตั้ง — ดาวน์โหลดตัวลงนาม หรือเลือก IPA ของคุณเองจาก Files", &options)?;
         match index {
             0 => Some(IpaChoice::Download {
                 url: ESIGN_IPA_URL,
@@ -455,7 +455,7 @@ impl Server {
     pub fn choose_p12(&self) -> Option<UploadedP12> {
         let answer = self.ask(json!({
             "kind": "p12",
-            "question": "Choose a .p12 certificate you have permission to sign with. Its password is asked next and never leaves this iPhone.",
+            "question": "เลือกใบรับรอง .p12 ที่คุณมีสิทธิ์ใช้ลงนาม (จะถามรหัสผ่านในขั้นถัดไป รหัสจะไม่ออกจากเครื่องนี้)",
         }));
         if let Some(id) = answer["id"].as_u64() {
             self.discard_upload(id);
@@ -467,9 +467,9 @@ impl Server {
         let password = self
             .ask(json!({
                 "kind": "secret",
-                "question": "Enter the password for the chosen .p12 certificate.",
+                "question": "ใส่รหัสผ่านของไฟล์ .p12 ที่เลือก",
                 "label": "Password",
-                "placeholder": "It is used only to open this certificate",
+                "placeholder": "ใช้เพียงเพื่อเปิดไฟล์ใบรับรองนี้",
             }))
             .get("value")
             .and_then(|v| v.as_str())
@@ -1357,9 +1357,9 @@ mod tests {
     #[test]
     fn ipa_source_offers_signers_and_files() {
         let options = vec![
-            "ESign — download its latest signer IPA".to_string(),
-            "Ksign — download its latest signer IPA".to_string(),
-            "Choose an .ipa from Files".to_string(),
+            "ESign — ดาวน์โหลดตัวลงนามเวอร์ชันล่าสุด".to_string(),
+            "Ksign — ดาวน์โหลดตัวลงนามเวอร์ชันล่าสุด".to_string(),
+            "เลือกไฟล์ .ipa จาก Files".to_string(),
         ];
         assert!(options[0].contains("ESign"));
         assert!(options[1].contains("Ksign"));
@@ -1372,12 +1372,11 @@ mod tests {
     fn certificate_modes_explain_private_key_and_never_default_to_a_mode_on_bad_input() {
         let options = certificate_mode_options();
         assert_eq!(options.len(), 3);
-        assert!(options[0].contains("may request one"));
-        assert!(options[1].contains("never create or revoke"));
+        assert!(options[0].contains("อัตโนมัติ"));
+        assert!(options[1].contains("คีย์เดิม"));
         assert!(options[2].contains(".p12"));
-        assert!(CERTIFICATE_MODE_HELP.contains("public certificate"));
-        assert!(CERTIFICATE_MODE_HELP.contains("matching private key"));
-        assert!(CERTIFICATE_MODE_HELP.contains("already stored by siboot"));
+        assert!(CERTIFICATE_MODE_HELP.contains("private key"));
+        assert!(CERTIFICATE_MODE_HELP.contains("siboot"));
         assert_eq!(
             certificate_mode_for_selection(0),
             Some(CertificateMode::Automatic)
@@ -1405,8 +1404,8 @@ mod tests {
         assert!(body.contains("<title>AelSign</title>"));
         assert!(body.contains("class=\"badge\">AelSign</span>"));
         assert!(body.contains("unknownuserael"));
-        assert!(body.contains("Choose an IPA from Files"));
-        assert!(body.contains("Choose apps you trust"));
+        assert!(body.contains("เลือกไฟล์จาก Files"));
+        assert!(body.contains("เลือก IPA ที่คุณไว้วางใจ"));
         assert!(body.contains("uploadFile"));
         assert!(body.contains("id=\"device\""));
         assert!(body.contains("id=\"bg\""));

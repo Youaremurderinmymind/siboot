@@ -70,9 +70,9 @@ const STAGES: usize = 7;
 const DEVMODE_STAGES: usize = 4;
 /// The steps' names on the live screen, in order.
 const STEP_NAMES: [&str; STAGES] = [
-    "Check", "Pairing", "Connect", "Apple ID", "Sign", "Install", "Finish",
+    "ตรวจสอบ", "จับคู่", "เชื่อมต่อ", "Apple ID", "ลงนาม", "ติดตั้ง", "เสร็จสิ้น",
 ];
-const DEVMODE_NAME: &str = "Dev Mode";
+const DEVMODE_NAME: &str = "โหมดนักพัฒนา";
 
 /// LocalDevVPN's address for this iPhone: traffic to it comes back to the
 /// device's own services.
@@ -360,9 +360,9 @@ fn main() -> ExitCode {
         if args.command == Command::DeveloperMode {
             "Shows Developer Mode, or turns it on."
         } else if page.is_some() {
-            "Signs and installs the selected IPA on this iPhone."
+            "ลงนามและติดตั้ง IPA ที่เลือกไว้ลงเครื่องนี้"
         } else {
-            "Installs SideInstaller on this iPhone."
+            "ติดตั้ง SideInstaller ลงเครื่องนี้"
         },
     );
     if let Some(url) = &page {

@@ -197,9 +197,9 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
 <main>
   <header class="top">
     <div class="brand"><span class="badge">AelSign</span><span class="version" id="version"></span></div>
-    <button type="button" class="stop" id="stop" hidden>Stop</button>
+    <button type="button" class="stop" id="stop" hidden>หยุด</button>
   </header>
-  <h1 class="tagline" id="tagline">Connecting to siboot…</h1>
+  <h1 class="tagline" id="tagline">กำลังเชื่อมต่อ siboot…</h1>
   <p class="keep" id="keep" hidden></p>
   <section class="device" id="device" hidden></section>
   <p class="banner" id="banner" role="status" hidden></p>
@@ -208,7 +208,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
   <ul class="items after" id="after"></ul>
   <form class="ask" id="ask" hidden novalidate></form>
   <footer>
-    <label class="details-toggle"><input type="checkbox" id="details">Show details</label>
+    <label class="details-toggle"><input type="checkbox" id="details">แสดงรายละเอียด</label>
     <span class="credit">
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.6a16.9 16.9 0 0 0-6.2 0L8.6 3a19.8 19.8 0 0 0-4.9 1.5C.7 9 .2 13.4.6 17.8A20 20 0 0 0 6.7 21l1-1.6a12.8 12.8 0 0 1-2-1l.5-.4a14.2 14.2 0 0 0 11.7 0l.5.4a12.8 12.8 0 0 1-2 1l1 1.6a20 20 0 0 0 6.1-3.2c.5-5.1-.9-9.5-3.2-13.4ZM8.7 15c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Z"/></svg>
       unknownuserael
@@ -291,7 +291,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     deviceEl.textContent = "";
     deviceEl.append(deviceIcon(e.product_type));
     const info = make("div");
-    info.append(make("div", "d-name", e.name || "This device"));
+    info.append(make("div", "d-name", e.name || "อุปกรณ์นี้"));
     const meta = make("div", "d-meta");
     meta.append(document.createTextNode((e.product_type || "iPhone") + " · iOS " + (e.ios_version || "?")));
     info.append(meta);
@@ -435,7 +435,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     const code = String(e.code || "");
     pinEl = make("section", "pin");
     pinEl.setAttribute("role", "status");
-    pinEl.append(make("h2", "pin-title", e.title || "Code"));
+    pinEl.append(make("h2", "pin-title", e.title || "รหัส"));
     const digits = make("div", "pin-digits");
     digits.setAttribute("aria-label", code.split("").join(" "));
     for (const d of code) {
@@ -474,7 +474,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     }
     if (cause) {
       const more = make("details", "cause");
-      more.append(make("summary", null, "Details"), make("p", null, cause));
+      more.append(make("summary", null, "รายละเอียด"), make("p", null, cause));
       outcomeEl.append(more);
     }
     outcomeEl.hidden = false;
@@ -492,8 +492,8 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     // it asks after (the log) comes as a new one.
     if (asking) answered(asking.id);
     pinEnd();
-    if (active >= 0) settle("failed", "stopped after " + clock(now() - steps[active].startedAt));
-    outcome("bad", "✕ Stopped", e.took || "", [e.advice], e.cause || "");
+    if (active >= 0) settle("failed", "หยุดหลัง " + clock(now() - steps[active].startedAt));
+    outcome("bad", "✕ หยุดแล้ว", e.took || "", [e.advice], e.cause || "");
   }
 
   function end() {
@@ -502,7 +502,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     pinEnd();
     stopEl.hidden = true;
     if (source) source.close();
-    banner("siboot is done. You can close this page.", "", "done");
+    banner("siboot ทำงานเสร็จแล้ว ปิดหน้านี้ได้", "", "done");
   }
 
   // ---------------------------------------------------------- questions
@@ -528,23 +528,23 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     const maxSize = kind === "p12" ? 16 * 1024 * 1024 : 1024 * 1024 * 1024;
     const limit = kind === "p12" ? "16 MB" : "1 GiB";
     const magicErr = kind === "p12"
-      ? "That file isn't a valid .p12 certificate archive. Choose another file."
-      : "That file isn't a valid IPA ZIP. Choose another file.";
+      ? "ไฟล์นี้ไม่ใช่ .p12 ที่ถูกต้อง เลือกไฟล์อื่น"
+      : "ไฟล์นี้ไม่ใช่ IPA (ZIP) ที่ถูกต้อง เลือกไฟล์อื่น";
     const chunkSize = 512 * 1024;
     if (!file.size || file.size > maxSize) {
-      status.textContent = file.size ? "This file is larger than the " + limit + " limit." : "This file is empty.";
+      status.textContent = file.size ? "ไฟล์ใหญ่เกินขีดจำกัด " + limit : "ไฟล์ว่างเปล่า";
       picker.value = "";
       return false;
     }
     if (!globalThis.crypto || !crypto.getRandomValues) {
-      status.textContent = "This browser can't securely start an upload. Reopen the page in Minis.";
+      status.textContent = "เบราว์เซอร์นี้เริ่มอัปโหลดอย่างปลอดภัยไม่ได้ เปิดหน้านี้ใหม่ใน Minis";
       picker.value = "";
       return false;
     }
     const token = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       (byte) => byte.toString(16).padStart(2, "0")).join("");
     busy(true);
-    status.textContent = "Uploading " + file.name + "…";
+    status.textContent = "กำลังอัปโหลด " + file.name + "…";
     try {
       for (let offset = 0; offset < file.size; offset += chunkSize) {
         const end = Math.min(offset + chunkSize, file.size);
@@ -561,23 +561,23 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
           cache: "no-store",
         });
         if (!reply.ok) {
-          const why = reply.status === 413 ? "This file is larger than the " + limit + " limit."
+          const why = reply.status === 413 ? "ไฟล์ใหญ่เกินขีดจำกัด " + limit
             : reply.status === 422 ? magicErr
-            : reply.status === 409 ? "The upload got out of sequence. Choose the file again."
-            : "Upload failed (HTTP " + reply.status + "). Choose the file again.";
+            : reply.status === 409 ? "การอัปโหลดผิดลำดับ เลือกไฟล์อีกครั้ง"
+            : "อัปโหลดไม่สำเร็จ (HTTP " + reply.status + ") เลือกไฟล์อีกครั้ง";
           throw new Error(why);
         }
         const percent = Math.floor((end * 100) / file.size);
         fill.style.width = percent + "%";
         track.setAttribute("aria-valuenow", String(percent));
-        status.textContent = "Uploading " + file.name + " · " + mb(end) + " of " + mb(file.size) + " MB";
+        status.textContent = "กำลังอัปโหลด " + file.name + " · " + mb(end) + "/" + mb(file.size) + " MB";
       }
-      status.textContent = (kind === "p12" ? "Certificate uploaded; checking the key…" : "IPA uploaded; checking the package…");
+      status.textContent = (kind === "p12" ? "อัปโหลดใบรับรองแล้ว กำลังตรวจคีย์…" : "อัปโหลด IPA แล้ว กำลังตรวจแพ็กเกจ…");
       return true;
     } catch (err) {
       busy(false);
       picker.value = "";
-      status.textContent = err instanceof Error ? err.message : "Upload failed. Choose the file again.";
+      status.textContent = err instanceof Error ? err.message : "อัปโหลดไม่สำเร็จ เลือกไฟล์อีกครั้ง";
       return false;
     }
   }
@@ -598,9 +598,9 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
       picker.accept = ".ipa,application/octet-stream";
       picker.setAttribute("aria-label", "Choose an IPA from Files");
       const label = make("label", "field");
-      label.append(make("span", "field-label", "Choose a file from Files"));
+      label.append(make("span", "field-label", "เลือกไฟล์จาก Files"));
       label.append(picker);
-      const choose = button("Choose IPA…", "primary", "button", () => picker.click());
+      const choose = button("เลือก IPA…", "primary", "button", () => picker.click());
       const hint = make("p", "ipa-hint", "IPA files up to 1 GiB. Choose apps you trust; the upload stays on this iPhone.");
       const uploadProgress = make("div", "ipa-progress");
       uploadProgress.hidden = true;
@@ -624,16 +624,16 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         uploadFile("ipa", file, e.id, status, fill, track, picker);
       });
       askEl.append(label, choose, hint, uploadProgress, status);
-      actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
+      actions.append(button("ยกเลิก", "quiet", "button", () => send({ cancel: true })));
     } else if (e.kind === "p12") {
       const picker = make("input", "file-input");
       picker.type = "file";
       picker.accept = ".p12,application/x-pkcs12,application/octet-stream";
-      picker.setAttribute("aria-label", "Choose a .p12 certificate from Files");
+      picker.setAttribute("aria-label", "เลือกใบรับรอง .p12 จาก Files");
       const label = make("label", "field");
-      label.append(make("span", "field-label", "Choose a .p12 certificate from Files"));
+      label.append(make("span", "field-label", "เลือกใบรับรอง .p12 จาก Files"));
       label.append(picker);
-      const choose = button("Choose .p12…", "primary", "button", () => picker.click());
+      const choose = button("เลือก .p12…", "primary", "button", () => picker.click());
       const hint = make("p", "ipa-hint", "A .p12 holds the private key for signing. Its password is asked separately and never stored.");
       const uploadProgress = make("div", "ipa-progress");
       uploadProgress.hidden = true;
@@ -657,7 +657,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         uploadFile("p12", file, e.id, status, fill, track, picker);
       });
       askEl.append(label, choose, hint, uploadProgress, status);
-      actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
+      actions.append(button("ยกเลิก", "quiet", "button", () => send({ cancel: true })));
     } else if (e.kind === "text" || e.kind === "secret" || e.kind === "line") {
       const field = make("label", "field");
       if (e.label) field.append(make("span", "field-label", e.label));
@@ -685,8 +685,8 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         if (!input.value.trim() && e.kind !== "line") return input.focus();
         send({ value: input.value });
       };
-      actions.append(button("Continue", "primary", "submit"));
-      actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
+      actions.append(button("ดำเนินการต่อ", "primary", "submit"));
+      actions.append(button("ยกเลิก", "quiet", "button", () => send({ cancel: true })));
     } else if (e.kind === "code") {
       const code = make("label", "code");
       const boxes = make("span", "boxes");
@@ -719,8 +719,8 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         ev.preventDefault();
         if (input.value.length === 6) send({ value: input.value });
       };
-      if (e.more) actions.append(button("Other ways", "secondary", "button", () => send({ more: true })));
-      actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
+      if (e.more) actions.append(button("วิธีอื่น", "secondary", "button", () => send({ more: true })));
+      actions.append(button("ยกเลิก", "quiet", "button", () => send({ cancel: true })));
       focus = input;
     } else if (e.kind === "ready") {
       const list = make("ol", "ready-steps");
@@ -732,7 +732,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         askEl.append(notes);
       }
       actions.append(button(e.button || "Start", "primary", "button", () => send({ go: true })));
-      actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
+      actions.append(button("ยกเลิก", "quiet", "button", () => send({ cancel: true })));
     } else if (e.kind === "confirm") {
       actions.append(button("Yes", e.default ? "primary" : "secondary", "button", () => send({ yes: true })));
       actions.append(button("No", e.default ? "secondary" : "primary", "button", () => send({ yes: false })));
@@ -784,7 +784,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     } catch (err) {
       if (asking && asking.id === id) {
         busy(false);
-        banner("Couldn't reach siboot. It runs in Minis's terminal: is Minis still open?", "warn", "unsent");
+        banner("ติดต่อ siboot ไม่ได้ siboot รันอยู่ในเทอร์มินัลของ Minis — Minis ยังเปิดอยู่ไหม?", "warn", "unsent");
       }
     }
   }
@@ -842,7 +842,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     if (Date.now() - lastHeard > 15000) {
       banner(heard
         ? "siboot isn't answering. It runs in Minis's terminal, and iOS pauses Minis when you leave it: go back to Minis to carry on."
-        : "Can't reach siboot. Open this page from siboot in Minis's terminal.", "warn", "quiet");
+        : "ติดต่อ siboot ไม่ได้ เปิดหน้านี้จาก siboot ในเทอร์มินัลของ Minis", "warn", "quiet");
     } else if (bannerWhy === "quiet") {
       banner("");
     }
@@ -853,18 +853,18 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
   stopEl.addEventListener("click", async () => {
     if (Date.now() - armed > 3000) {
       armed = Date.now();
-      stopEl.textContent = "Tap again to stop";
+      stopEl.textContent = "แตะอีกครั้งเพื่อหยุด";
       stopEl.classList.add("armed");
       setTimeout(() => {
         if (Date.now() - armed >= 3000 && !stopEl.disabled) {
-          stopEl.textContent = "Stop";
+          stopEl.textContent = "หยุด";
           stopEl.classList.remove("armed");
         }
       }, 3100);
       return;
     }
     stopEl.disabled = true;
-    stopEl.textContent = "Stopping…";
+    stopEl.textContent = "กำลังหยุด…";
     try {
       await fetch("stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     } catch (err) {}
