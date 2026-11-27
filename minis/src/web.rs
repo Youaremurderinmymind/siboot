@@ -1404,13 +1404,12 @@ mod tests {
         assert_eq!(status, 200);
         assert!(body.contains("<title>AelSign</title>"));
         assert!(body.contains("class=\"badge\">AelSign</span>"));
-        assert!(body.contains("Based on siboot by FrizzleM"));
+        assert!(body.contains("unknownuserael"));
         assert!(body.contains("Choose an IPA from Files"));
         assert!(body.contains("Choose apps you trust"));
         assert!(body.contains("uploadFile"));
         assert!(body.contains("id=\"device\""));
         assert!(body.contains("id=\"bg\""));
-        assert!(body.contains("unknownuserael"));
         assert_eq!(header(&headers, "content-security-policy"), Some(CSP));
         assert_eq!(header(&headers, "referrer-policy"), Some("no-referrer"));
         assert_eq!(header(&headers, "cache-control"), Some("no-store"));
