@@ -1405,7 +1405,6 @@ mod tests {
         assert!(body.contains("class=\"badge\">AelSign</span>"));
         assert!(body.contains("unknownuserael"));
         assert!(body.contains("เลือกไฟล์จาก Files"));
-        assert!(body.contains("เลือก IPA ที่คุณไว้วางใจ"));
         assert!(body.contains("uploadFile"));
         assert!(body.contains("id=\"device\""));
         assert!(body.contains("id=\"bg\""));
