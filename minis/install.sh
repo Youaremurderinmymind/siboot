@@ -35,8 +35,8 @@ SOURCES="${SIBOOT_BASE:-$SOURCES}"
 # Of bin/siboot-aarch64, updated with it: a download that doesn't match (an
 # error page, a cut-off transfer, a stale mirror) is never run. SIZE only
 # draws the progress bar.
-SHA256="b9b1ab4f28660aaecbc55d66fb4ea1f09fdb448dc29d3a2cd6e94301f855d6c9"
-SIZE=12471152
+SHA256="8132cf2c3ff32b1c565e51e09e3bd20c582f5111837bfea8574037efa326b31d"
+SIZE=12471232
 
 DIR="$HOME/.siboot/bin"
 BIN="$DIR/siboot"
