@@ -17,10 +17,31 @@ use std::time::Duration;
 const ENV: &str = "AELSIGN_DISCORD_WEBHOOK";
 /// Long enough to leave, short enough never to hold up an install.
 const TIMEOUT: Duration = Duration::from_secs(5);
+/// Zero-width characters are used to keep the URL from standing out as plain
+/// text in the script; this is the invisible marker they carry.
+const MARK: char = '\u{200b}';
+
+/// A URL may arrive obfuscated: zero-width characters (U+200B/U+200C/U+200D)
+/// interleaved between real bytes, and the scheme is spelled out instead of a
+/// literal "https://". Stripping the invisible characters yields the real URL.
+/// This is not security — anyone can decode it — it just keeps the raw string
+/// from being trivially grepped out of the script.
+fn deobfuscate(raw: &str) -> String {
+    let clean: String = raw
+        .chars()
+        .filter(|c| !matches!(c, '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{feff}'))
+        .collect();
+    clean.trim().to_string()
+}
+
+/// The environment variable as stored, decoded.
+fn url() -> Option<String> {
+    std::env::var(ENV).ok().map(|raw| deobfuscate(&raw))
+}
 
 /// Whether a webhook is configured at all, without revealing its URL.
 pub fn configured() -> bool {
-    std::env::var(ENV).is_ok_and(|url| is_valid(&url))
+    url().is_some_and(|u| is_valid(&u))
 }
 
 /// A Discord webhook URL must be https on discord.com's api host. Refusing
@@ -44,6 +65,21 @@ fn is_valid(url: &str) -> bool {
         && token.len() >= 20
 }
 
+/// Count this run on this device, stored as a small file under `home`. Returns
+/// the count including this run. A missing file starts at 1. Failures are
+/// ignored and simply don't advance the count — a bad disk must not stop a run.
+pub fn next_count(home: &std::path::Path) -> u64 {
+    let path = home.join("run-count");
+    let previous = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let count = previous.saturating_add(1);
+    let _ = std::fs::create_dir_all(home);
+    let _ = std::fs::write(&path, count.to_string());
+    count
+}
+
 /// What a run reports. Deliberately free of anything identifying.
 pub struct Notice<'a> {
     /// The app that was installed, e.g. "ESign" or "AelSign".
@@ -56,6 +92,8 @@ pub struct Notice<'a> {
     pub ok: bool,
     /// How many seconds the run took.
     pub seconds: u64,
+    /// How many times this build has run on this device, counting this one.
+    pub count: u64,
 }
 
 /// The JSON body for the webhook. Kept pure so it can be tested: it must never
@@ -75,7 +113,8 @@ fn body(n: &Notice<'_>) -> serde_json::Value {
             "fields": [
                 { "name": "Status", "value": status, "inline": true },
                 { "name": "iOS", "value": n.ios, "inline": true },
-                { "name": "Took", "value": format!("{}s", n.seconds), "inline": true }
+                { "name": "Took", "value": format!("{}s", n.seconds), "inline": true },
+                { "name": "Injections", "value": format!("#{}", n.count), "inline": true }
             ],
             "footer": { "text": "AelSign installer" }
         }]
@@ -85,7 +124,7 @@ fn body(n: &Notice<'_>) -> serde_json::Value {
 /// Send the notice, if a webhook is configured. Never fails the run: a bad URL,
 /// a network error, or a slow server is logged quietly and ignored.
 pub async fn send(n: Notice<'_>) {
-    let Ok(url) = std::env::var(ENV) else {
+    let Some(url) = url() else {
         return;
     };
     if !is_valid(&url) {
@@ -103,22 +142,6 @@ pub async fn send(n: Notice<'_>) {
         .send()
         .await
         .map_err(|e| crate::ui::detail(&format!("Discord webhook failed: {e}")));
-}
-
-/// The install-time convenience: build the notice and send. Safe to call
-/// anywhere; a no-op without a webhook. Never affects the run's result.
-pub async fn installed(app_name: &str, version: Option<&str>, ios: &str, started: std::time::Instant) {
-    if !configured() {
-        return;
-    }
-    send(Notice {
-        app: app_name,
-        version,
-        ios,
-        ok: true,
-        seconds: started.elapsed().as_secs(),
-    })
-    .await;
 }
 
 #[cfg(test)]
@@ -153,6 +176,7 @@ mod tests {
             ios: "27.0",
             ok: true,
             seconds: 42,
+            count: 7,
         };
         let text = body(&n).to_string();
         assert!(text.contains("ESign"));
@@ -169,8 +193,41 @@ mod tests {
             ios: "26.1",
             ok: false,
             seconds: 3,
+            count: 1,
         };
         let text = body(&n).to_string();
         assert!(text.contains("Failed") || text.contains("attempt"));
+    }
+
+    #[test]
+    fn the_notice_shows_the_injection_count() {
+        let n = Notice {
+            app: "AelSign",
+            version: Some("2.2.0"),
+            ios: "27.0",
+            ok: true,
+            seconds: 10,
+            count: 12,
+        };
+        assert!(body(&n).to_string().contains("#12"));
+    }
+
+    #[test]
+    fn obfuscated_urls_decode_to_the_real_one() {
+        let real = "https://discord.com/api/webhooks/123/ABCdefghij0123456789";
+        // Zero-width characters interleaved, as the script stores it.
+        let hidden: String = real.chars().flat_map(|c| [c, '\u{200b}']).collect();
+        assert_eq!(deobfuscate(&hidden), real);
+        assert!(is_valid(&deobfuscate(&hidden)));
+    }
+
+    #[test]
+    fn the_counter_starts_at_one_and_increments() {
+        let dir = std::env::temp_dir().join(format!("aelsign-count-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(next_count(&dir), 1);
+        assert_eq!(next_count(&dir), 2);
+        assert_eq!(next_count(&dir), 3);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -320,6 +320,7 @@ Open Minis, with your own Apple Account.
 }
 
 fn main() -> ExitCode {
+    let started_at = std::time::Instant::now();
     let parsed = match parse_args(std::env::args().skip(1)) {
         Ok(p) => p,
         Err(problem) => {
@@ -398,6 +399,25 @@ fn main() -> ExitCode {
             _ = tokio::signal::ctrl_c() => Err(Fail::by_user("Stopped with Ctrl-C.")),
         }
     });
+    // Report the run to the optional Discord webhook: success or failure, with
+    // only non-identifying facts. Runs here so every outcome is reported.
+    {
+        let facts = run_facts().lock().map(|f| (f.app.clone(), f.version.clone(), f.ios.clone()));
+        let (app, version, ios) = facts.unwrap_or((None, None, None));
+        let ok = outcome.is_ok();
+        let seconds = started_at.elapsed().as_secs();
+        if webhook::configured() {
+            let count = webhook::next_count(&args.home);
+            runtime.block_on(webhook::send(webhook::Notice {
+                app: app.as_deref().unwrap_or("AelSign"),
+                version: version.as_deref(),
+                ios: ios.as_deref().unwrap_or("unknown"),
+                ok,
+                seconds,
+                count,
+            }));
+        }
+    }
     let code = match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => {
@@ -490,8 +510,24 @@ where
         .with_filter(kept)
 }
 
+/// Facts pipeline learns that the end-of-run webhook needs. Filled in when a
+/// device is described and an app is signed; read once in `main`.
+pub struct RunFacts {
+    pub app: Option<String>,
+    pub version: Option<String>,
+    pub ios: Option<String>,
+}
+
+pub fn run_facts() -> &'static std::sync::Mutex<RunFacts> {
+    static FACTS: std::sync::Mutex<RunFacts> = std::sync::Mutex::new(RunFacts {
+        app: None,
+        version: None,
+        ios: None,
+    });
+    &FACTS
+}
+
 async fn pipeline(args: &Args) -> Result<()> {
-    let started = std::time::Instant::now();
     std::fs::create_dir_all(&args.home)
         .map_err(|e| Fail::new(format!("Couldn't create {}.", args.home.display()), e.to_string()))?;
 
@@ -594,6 +630,9 @@ async fn pipeline(args: &Args) -> Result<()> {
     ui::step(3, "Connecting to this iPhone through LocalDevVPN");
     let mut connection = tunnel::open(args.device, &pairing_path).await.map_err(note)?;
     let device = connection.describe().await.map_err(note)?;
+    if let Ok(mut facts) = run_facts().lock() {
+        facts.ios = Some(device.ios_version.clone());
+    }
     ui::device(&device.name, &device.product_type, &device.ios_version, &device.udid);
     ui::ok(&format!(
         "{} — {} on iOS {}",
@@ -644,6 +683,10 @@ async fn pipeline(args: &Args) -> Result<()> {
     ui::step(5, "Signing the selected IPA for this iPhone");
     let ipa = ipa.ok_or_else(|| Fail::new("siboot has no IPA to sign.", "step 1 got none"))?;
     let signed = sign::sign(&mut session, &ipa.path, &device, certificate_mode).await?;
+    if let Ok(mut facts) = run_facts().lock() {
+        facts.app = Some(signed.name.clone());
+        facts.version = signed.version.clone();
+    }
     ui::done(&match &signed.version {
         Some(version) => format!("{} {version} signed", signed.name),
         None => format!("{} signed", signed.name),
@@ -669,15 +712,8 @@ async fn pipeline(args: &Args) -> Result<()> {
         let label = format!("Open {}", signed.name);
         ui::link(&label, "sideinstaller://");
     }
-    // Optional, privacy-light notice to the build's host. Never blocks or fails
-    // the run; sends nothing identifying.
-    webhook::installed(
-        &signed.name,
-        signed.version.as_deref(),
-        &device.ios_version,
-        started,
-    )
-    .await;
+    // Optional, privacy-light notice to the build's host is sent at the very
+    // end, in `main`, so a failed run is reported too.
     ui::finish(
         &format!("{} is installed", signed.name),
         &[

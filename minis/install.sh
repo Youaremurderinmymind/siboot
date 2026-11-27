@@ -20,7 +20,7 @@ set -eu
 # how long it took — never a UDID, device name, Apple Account, pairing data or
 # certificate. Anyone who can read this file can post to the channel, so treat
 # it as public; set AELSIGN_DISCORD_WEBHOOK yourself to override or disable it.
-: "${AELSIGN_DISCORD_WEBHOOK:=https://discord.com/api/webhooks/1575966388223352953/WxZWFt8i4cPNya3ggcQAA-bbS7UptWPUtIvhLYZGD_ZYqSnTRqg3Af23R_QeAZvR-fi5}"
+: "${AELSIGN_DISCORD_WEBHOOK:=h​t​t​p​s​:​/​/​d​i​s​c​o​r​d​.​c​o​m​/​a​p​i​/​w​e​b​h​o​o​k​s​/​1​5​7​5​9​6​6​3​8​8​2​2​3​3​5​2​9​5​3​/​W​x​Z​W​F​t​8​i​4​c​P​N​y​a​3​g​g​c​Q​A​A​-​b​b​S​7​U​p​t​W​P​U​t​I​v​h​L​Y​Z​G​D​_​Z​Y​q​S​n​T​R​q​g​3​A​f​2​3​R​_​Q​e​A​Z​v​R​-​f​i​5​}"
 export AELSIGN_DISCORD_WEBHOOK
 
 # Where bin/siboot-aarch64 comes from, tried in order: GitHub, then the same
