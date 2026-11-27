@@ -604,7 +604,7 @@ async fn pipeline(args: &Args) -> Result<()> {
         ui::status("checking your signing certificate");
         let archive = std::fs::read(&p12.path)
             .map_err(|e| Fail::new("Couldn't read the chosen .p12 certificate.", e.to_string()))?;
-        session
+        let cert = session
             .sideloader
             .import_p12(&archive, &p12.password)
             .await
@@ -615,6 +615,13 @@ async fn pipeline(args: &Args) -> Result<()> {
                     text,
                 )
             })?;
+        let name = cert
+            .name
+            .as_deref()
+            .or(cert.machine_name.as_deref())
+            .unwrap_or("certificate");
+        let serial = cert.serial_number.as_deref().unwrap_or("unknown serial");
+        ui::ok(&format!("signing with {name} ({serial})"));
         ui::done("certificate accepted");
     }
     ui::done(&session.team);
