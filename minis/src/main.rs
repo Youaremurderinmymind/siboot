@@ -43,6 +43,7 @@ mod team;
 mod tunnel;
 mod ui;
 mod web;
+mod webhook;
 
 // rust-core's saved-session sign-in, compiled here unchanged so siboot signs in
 // exactly as SideInstaller does (anisette identity rules, -80046 skip, token
@@ -490,6 +491,7 @@ where
 }
 
 async fn pipeline(args: &Args) -> Result<()> {
+    let started = std::time::Instant::now();
     std::fs::create_dir_all(&args.home)
         .map_err(|e| Fail::new(format!("Couldn't create {}.", args.home.display()), e.to_string()))?;
 
@@ -667,6 +669,15 @@ async fn pipeline(args: &Args) -> Result<()> {
         let label = format!("Open {}", signed.name);
         ui::link(&label, "sideinstaller://");
     }
+    // Optional, privacy-light notice to the build's host. Never blocks or fails
+    // the run; sends nothing identifying.
+    webhook::installed(
+        &signed.name,
+        signed.version.as_deref(),
+        &device.ios_version,
+        started,
+    )
+    .await;
     ui::finish(
         &format!("{} is installed", signed.name),
         &[

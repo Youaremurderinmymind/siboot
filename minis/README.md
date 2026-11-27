@@ -63,6 +63,15 @@ own-.p12 can still register the device/app ID and request a provisioning
 profile. No certificate content or password is ever logged or sent anywhere
 except this iPhone.
 
+If the environment variable `AELSIGN_DISCORD_WEBHOOK` holds a Discord webhook
+URL, the installer posts a short notice to it when a run finishes, so whoever
+hosts this build can see that someone used it. Only non-identifying facts are
+sent: the app name and version, the iOS version, success or failure, and how
+long it took — never the UDID, device name, Apple Account, pairing data,
+certificate, or IPA content. The send is best-effort and bounded by a 5-second
+timeout, so a slow or broken webhook never delays or breaks an install. Leave
+the variable unset to disable it.
+
 In Open Minis 1.15 or older siboot stops at once and says to update Minis from
 the App Store (the page has a button for it). Minis doesn't tell the shell its
 version, so siboot goes by `minis-bonjour`, which came with 1.16. siboot still
