@@ -2,7 +2,7 @@ name: Build Open Minis installer
 
 on:
   push:
-    branches: [main, aelsign-web-picker]
+    branches: [main, aelsign-web-picker, aelsign-cert-options]
     paths:
       - "minis/src/**"
       - "minis/Cargo.toml"
@@ -12,6 +12,7 @@ on:
       - "rootshell/Cargo.toml"
       - "rootshell/Cargo.lock"
       - "SideInstaller"
+      - "patches/**"
       - ".github/workflows/build-minis.yml"
   workflow_dispatch:
 
@@ -41,6 +42,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang cmake libclang-dev libssl-dev musl-tools perl pkg-config
+
+      - name: Apply the pinned isideload certificate-mode patch
+        working-directory: SideInstaller
+        run: |
+          git apply --check ../patches/isideload-existing-cert-only.patch
+          git apply ../patches/isideload-existing-cert-only.patch
 
       - name: Run installer unit tests
         working-directory: minis

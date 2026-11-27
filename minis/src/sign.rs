@@ -11,6 +11,7 @@ use crate::account::Session;
 use crate::fail::{Fail, Result};
 use crate::tunnel::DeviceInfo;
 use crate::ui;
+pub use crate::web::CertificateMode;
 
 pub struct Signed {
     /// The signed `.app` folder, ready to upload.
@@ -21,8 +22,19 @@ pub struct Signed {
     pub version: Option<String>,
 }
 
-pub async fn sign(session: &mut Session, ipa: &Path, device: &DeviceInfo) -> Result<Signed> {
+pub async fn sign(
+    session: &mut Session,
+    ipa: &Path,
+    device: &DeviceInfo,
+    certificate_mode: CertificateMode,
+) -> Result<Signed> {
     ui::status("signing; this takes a while here");
+    match certificate_mode {
+        CertificateMode::Automatic => {}
+        CertificateMode::ExistingOnly | CertificateMode::OwnP12 => {
+            session.sideloader.use_existing_certificate_only();
+        }
+    }
     let (app_dir, _special) = session
         .sideloader
         .sign_app(
@@ -50,7 +62,9 @@ pub async fn sign(session: &mut Session, ipa: &Path, device: &DeviceInfo) -> Res
 
 /// Advice for the refusals SideInstaller's own signing explains.
 fn sign_advice(text: &str) -> String {
-    if text.starts_with("device registration failed") {
+    if text.contains("No existing development certificate matches") {
+        "The chosen certificate's private key doesn't match an active development certificate on this Apple team. Its matching private key is required to sign; nothing was created, imported, or revoked. Choose a .p12 whose key belongs to a certificate on this team.".into()
+    } else if text.starts_with("device registration failed") {
         "Apple wouldn't register this iPhone with your developer team, so it won't issue a \
          provisioning profile."
             .into()
@@ -95,6 +109,15 @@ fn bundle_info(app_dir: &Path) -> Result<(String, String, Option<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_only_mismatch_advice_explains_the_missing_private_key() {
+        let advice = sign_advice(
+            "No existing development certificate matches the private key already stored",
+        );
+        assert!(advice.contains("matching private key"));
+        assert!(advice.contains("nothing was created, imported, or revoked"));
+    }
 
     #[test]
     fn the_bundle_id_and_name_come_from_info_plist() {

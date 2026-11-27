@@ -49,6 +49,7 @@ const MAX_HEAD: usize = 8 * 1024;
 /// Uploads are sequential 512 KiB chunks; only one chunk is held in memory.
 const MAX_BODY: usize = 512 * 1024;
 const MAX_IPA_SIZE: u64 = 1024 * 1024 * 1024;
+const MAX_P12_SIZE: u64 = 16 * 1024 * 1024;
 /// Connections at once. The page keeps one open and makes one for each
 /// answer; a reload or two more is plenty.
 const MAX_CONNECTIONS: usize = 16;
@@ -101,6 +102,71 @@ pub fn progress_end() {
 /// Ask the page to choose an IPA from Files, if this run has a web page.
 pub fn choose_ipa() -> Option<UploadedIpa> {
     page()?.choose_ipa()
+}
+
+/// What the user wants to install: one of the official signer releases, or an
+/// IPA they pick from Files. `Download` URLs are fetched by the normal
+/// `--ipa URL` path in `download.rs`.
+pub enum IpaChoice {
+    Download { url: &'static str, name: &'static str },
+    Upload(UploadedIpa),
+}
+
+pub const ESIGN_IPA_URL: &str =
+    "https://github.com/Esign-ipa/ESign-ipa-signer/releases/download/Esign/esign.ipa";
+pub const KSIGN_IPA_URL: &str =
+    "https://github.com/Nyasami/Ksign/releases/download/v1.6/Ksign.ipa";
+
+/// Ask the local page which IPA to install first: ESign, Ksign, or the user's
+/// own `.ipa` from Files.
+pub fn choose_ipa_source() -> Option<IpaChoice> {
+    page()?.choose_ipa_source()
+}
+
+/// Ask the page for a `.p12` certificate and its password, if it has a page.
+pub fn choose_p12() -> Option<UploadedP12> {
+    page()?.choose_p12()
+}
+
+/// Which certificate signing may use, chosen on the local page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CertificateMode {
+    /// Keep siboot's existing behavior: reuse a matching certificate or ask
+    /// Apple for one, prompting before a revocation if Apple's limit is full.
+    Automatic,
+    /// Use only the certificate that matches siboot's already stored private
+    /// key. Do not create or revoke a certificate.
+    ExistingOnly,
+    /// Sign with the user's `.p12` certificate: import its key (it must match
+    /// a certificate on the selected team), then require exactly that identity.
+    OwnP12,
+}
+
+/// Ask the local page whether signing may request a certificate or must use
+/// only a matching certificate whose private key siboot already has stored.
+pub fn choose_certificate_mode() -> Option<CertificateMode> {
+    let options = certificate_mode_options();
+    let selected = page()?.choose(CERTIFICATE_MODE_HELP, &options)?;
+    certificate_mode_for_selection(selected)
+}
+
+const CERTIFICATE_MODE_HELP: &str = "Signing mode. The Developer Portal exposes only the public certificate; signing needs its matching private key. Existing-only uses a key already stored by siboot. It can still register this device/app and request a profile.";
+
+fn certificate_mode_options() -> Vec<String> {
+    vec![
+        "Automatic certificate handling (may request one; prompts before revoking)".to_string(),
+        "Existing siboot key only (never create or revoke a certificate)".to_string(),
+        "Use my own .p12 certificate (choose a file, sign with its key)".to_string(),
+    ]
+}
+
+fn certificate_mode_for_selection(index: usize) -> Option<CertificateMode> {
+    match index {
+        0 => Some(CertificateMode::Automatic),
+        1 => Some(CertificateMode::ExistingOnly),
+        2 => Some(CertificateMode::OwnP12),
+        _ => None,
+    }
 }
 
 /// What the page's Stop does, on the thread that took the request.
@@ -181,6 +247,37 @@ struct Shared {
     on_stop: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileKind {
+    Ipa,
+    P12,
+}
+
+impl FileKind {
+    fn max_size(self) -> u64 {
+        match self {
+            FileKind::Ipa => MAX_IPA_SIZE,
+            FileKind::P12 => MAX_P12_SIZE,
+        }
+    }
+
+    fn magic(self) -> &'static [u8] {
+        match self {
+            // PK\x03\x04 ZIP for IPAs; DER for PKCS#12 starts with `0x30 0x82`.
+            FileKind::Ipa => &b"PK\x03\x04"[..],
+            FileKind::P12 => &[0x30, 0x82],
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            FileKind::Ipa => "ipa",
+            FileKind::P12 => "p12",
+        }
+    }
+
+}
+
 #[derive(Default)]
 struct State {
     /// Every event so far, as JSON. An event's id is its index.
@@ -188,12 +285,17 @@ struct State {
     /// The question waiting for the page, and its answer once given.
     asking: Option<u64>,
     asking_ipa: bool,
+    /// The kind of the upload the page is working on now (for its size limit
+    /// and the magic bytes that prove the file is what the question asked for).
+    file_kind: Option<FileKind>,
     answer: Option<Value>,
     questions: u64,
-    /// The upload waiting for the page's current IPA question.
+    /// The upload waiting for the page's current IPA/P12 question.
     upload: Option<Upload>,
     /// The completed temporary IPA, retained so Stop can remove it too.
     staged_ipa: Option<PathBuf>,
+    /// The completed temporary .p12, retained so Stop can remove it too.
+    staged_p12: Option<PathBuf>,
     /// The event streams open now, and how many events each has sent.
     streams: HashMap<u64, usize>,
     stream_ids: u64,
@@ -225,6 +327,18 @@ pub struct UploadedIpa {
 }
 
 impl Drop for UploadedIpa {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// The `.p12` certificate uploaded from Files; removed when the run finishes.
+pub struct UploadedP12 {
+    pub path: PathBuf,
+    pub password: String,
+}
+
+impl Drop for UploadedP12 {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }
@@ -314,6 +428,59 @@ impl Server {
         })
     }
 
+    /// Ask which IPA to install: a known signer release, or the user's own.
+    pub fn choose_ipa_source(&self) -> Option<IpaChoice> {
+        let options = vec![
+            "ESign — download its latest signer IPA".to_string(),
+            "Ksign — download its latest signer IPA".to_string(),
+            "Choose an .ipa from Files".to_string(),
+        ];
+        let index = self.choose("Install an app. Pick a signer to download, or choose your own IPA from Files.", &options)?;
+        match index {
+            0 => Some(IpaChoice::Download {
+                url: ESIGN_IPA_URL,
+                name: "ESign",
+            }),
+            1 => Some(IpaChoice::Download {
+                url: KSIGN_IPA_URL,
+                name: "Ksign",
+            }),
+            2 => self.choose_ipa().map(IpaChoice::Upload),
+            _ => None,
+        }
+    }
+
+    /// Ask the page for a `.p12` certificate (with its private key) and its
+    /// password, so the run can sign with a certificate you already have.
+    pub fn choose_p12(&self) -> Option<UploadedP12> {
+        let answer = self.ask(json!({
+            "kind": "p12",
+            "question": "Choose a .p12 certificate you have permission to sign with. Its password is asked next and never leaves this iPhone.",
+        }));
+        if let Some(id) = answer["id"].as_u64() {
+            self.discard_upload(id);
+        }
+        if cancelled(&answer) {
+            return None;
+        }
+        let path = answer["path"].as_str()?;
+        let password = self
+            .ask(json!({
+                "kind": "secret",
+                "question": "Enter the password for the chosen .p12 certificate.",
+                "label": "Password",
+                "placeholder": "It is used only to open this certificate",
+            }))
+            .get("value")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Some(UploadedP12 {
+            path: PathBuf::from(path),
+            password,
+        })
+    }
+
     fn discard_upload(&self, question: u64) {
         let upload = {
             let mut state = self.shared.lock();
@@ -342,6 +509,11 @@ impl Server {
         question["id"] = json!(id);
         state.asking = Some(id);
         state.asking_ipa = question["kind"].as_str() == Some("ipa");
+        state.file_kind = match question["kind"].as_str() {
+            Some("ipa") => Some(FileKind::Ipa),
+            Some("p12") => Some(FileKind::P12),
+            _ => None,
+        };
         state.answer = None;
         shared.push(&mut state, question);
         let answer = loop {
@@ -355,6 +527,7 @@ impl Server {
         };
         state.asking = None;
         state.asking_ipa = false;
+        state.file_kind = None;
         shared.push(&mut state, json!({"t": "answered", "id": id}));
         answer
     }
@@ -466,6 +639,9 @@ impl Server {
             let _ = std::fs::remove_file(upload.path);
         }
         if let Some(path) = state.staged_ipa.take() {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Some(path) = state.staged_p12.take() {
             let _ = std::fs::remove_file(path);
         }
         if !state.ended {
@@ -756,21 +932,23 @@ fn upload(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<
     if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return refuse(stream, 400);
     }
-    if size == 0 || size > MAX_IPA_SIZE {
-        return refuse(stream, 413);
-    }
-    if request.body.is_empty()
-        || request.body.len() > MAX_BODY
-        || offset
-            .checked_add(request.body.len() as u64)
-            .map_or(true, |end| end > size)
-    {
-        return refuse(stream, 400);
-    }
-
     let (status, remove) = {
         let mut state = shared.lock();
-        if state.asking != Some(question) || !state.asking_ipa || state.answer.is_some() {
+        let Some(kind) = state.file_kind else {
+            return refuse(stream, 409);
+        };
+        if size == 0 || size > kind.max_size() {
+            return refuse(stream, 413);
+        }
+        if request.body.is_empty()
+            || request.body.len() > MAX_BODY
+            || offset
+                .checked_add(request.body.len() as u64)
+                .map_or(true, |end| end > size)
+        {
+            return refuse(stream, 400);
+        }
+        if state.asking != Some(question) || state.file_kind.is_none() || state.answer.is_some() {
             return refuse(stream, 409);
         }
         // A fresh file selection starts at zero and replaces a failed/partial
@@ -786,7 +964,7 @@ fn upload(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<
             if offset != 0 {
                 return refuse(stream, 409);
             }
-            let upload = match new_upload(question, token.to_string(), size) {
+            let upload = match new_upload(question, token.to_string(), size, kind) {
                 Ok(upload) => upload,
                 Err(_) => return refuse(stream, 500),
             };
@@ -809,11 +987,12 @@ fn upload(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<
                 } else if upload.file.flush().is_err() || upload.file.sync_all().is_err() {
                     ChunkOutcome::Failed
                 } else {
-                    let mut magic = [0u8; 4];
+                    let magic_len = kind.magic().len();
+                    let mut magic = vec![0u8; magic_len];
                     let valid = std::fs::File::open(&upload.path)
                         .and_then(|mut file| file.read_exact(&mut magic))
                         .is_ok()
-                        && &magic == b"PK\x03\x04";
+                        && magic == kind.magic();
                     if valid {
                         ChunkOutcome::Complete
                     } else {
@@ -837,7 +1016,10 @@ fn upload(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<
                 let complete = state.upload.take().unwrap();
                 let path = complete.path.clone();
                 drop(complete);
-                state.staged_ipa = Some(path.clone());
+                match kind {
+                    FileKind::P12 => state.staged_p12 = Some(path.clone()),
+                    FileKind::Ipa => state.staged_ipa = Some(path.clone()),
+                }
                 state.answer = Some(json!({
                     "id": question,
                     "path": path.to_string_lossy().into_owned(),
@@ -853,10 +1035,14 @@ fn upload(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<
     respond(stream, status, &[], b"")
 }
 
-fn new_upload(question: u64, token: String, size: u64) -> io::Result<Upload> {
+fn new_upload(question: u64, token: String, size: u64, kind: FileKind) -> io::Result<Upload> {
     use std::os::unix::fs::OpenOptionsExt;
 
-    let path = std::env::temp_dir().join(format!("siboot-upload-{}.ipa", random_key()?));
+    let path = std::env::temp_dir().join(format!(
+        "siboot-upload-{}.{}",
+        random_key()?,
+        kind.extension()
+    ));
     let file = std::fs::OpenOptions::new()
         .write(true)
         .read(true)
@@ -899,14 +1085,17 @@ fn stop(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<()
         return refuse(stream, status);
     }
     respond(stream, 204, &[], b"")?;
-    let (upload, staged) = {
+    let (upload, staged, staged_p12) = {
         let mut state = shared.lock();
-        (state.upload.take(), state.staged_ipa.take())
+        (state.upload.take(), state.staged_ipa.take(), state.staged_p12.take())
     };
     if let Some(upload) = upload {
         let _ = std::fs::remove_file(upload.path);
     }
     if let Some(path) = staged {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Some(path) = staged_p12 {
         let _ = std::fs::remove_file(path);
     }
     if let Some(stop) = shared
@@ -1166,6 +1355,45 @@ mod tests {
     }
 
     #[test]
+    fn ipa_source_offers_signers_and_files() {
+        let options = vec![
+            "ESign — download its latest signer IPA".to_string(),
+            "Ksign — download its latest signer IPA".to_string(),
+            "Choose an .ipa from Files".to_string(),
+        ];
+        assert!(options[0].contains("ESign"));
+        assert!(options[1].contains("Ksign"));
+        assert!(options[2].contains("Files"));
+        assert!(ESIGN_IPA_URL.ends_with("esign.ipa"));
+        assert!(KSIGN_IPA_URL.ends_with("Ksign.ipa"));
+    }
+
+    #[test]
+    fn certificate_modes_explain_private_key_and_never_default_to_a_mode_on_bad_input() {
+        let options = certificate_mode_options();
+        assert_eq!(options.len(), 3);
+        assert!(options[0].contains("may request one"));
+        assert!(options[1].contains("never create or revoke"));
+        assert!(options[2].contains(".p12"));
+        assert!(CERTIFICATE_MODE_HELP.contains("public certificate"));
+        assert!(CERTIFICATE_MODE_HELP.contains("matching private key"));
+        assert!(CERTIFICATE_MODE_HELP.contains("already stored by siboot"));
+        assert_eq!(
+            certificate_mode_for_selection(0),
+            Some(CertificateMode::Automatic)
+        );
+        assert_eq!(
+            certificate_mode_for_selection(1),
+            Some(CertificateMode::ExistingOnly)
+        );
+        assert_eq!(
+            certificate_mode_for_selection(2),
+            Some(CertificateMode::OwnP12)
+        );
+        assert_eq!(certificate_mode_for_selection(3), None);
+    }
+
+    #[test]
     fn every_path_starts_with_the_key() {
         let server = served();
         assert_eq!(get(&server, "/").0, 404);
@@ -1176,10 +1404,12 @@ mod tests {
         assert_eq!(status, 200);
         assert!(body.contains("<title>AelSign</title>"));
         assert!(body.contains("class=\"badge\">AelSign</span>"));
-        assert!(body.contains("Based on siboot by FrizzleM"));
+        assert!(body.contains("unknownuserael"));
         assert!(body.contains("Choose an IPA from Files"));
         assert!(body.contains("Choose apps you trust"));
-        assert!(body.contains("uploadIpa"));
+        assert!(body.contains("uploadFile"));
+        assert!(body.contains("id=\"device\""));
+        assert!(body.contains("id=\"bg\""));
         assert_eq!(header(&headers, "content-security-policy"), Some(CSP));
         assert_eq!(header(&headers, "referrer-policy"), Some("no-referrer"));
         assert_eq!(header(&headers, "cache-control"), Some("no-store"));
@@ -1357,6 +1587,39 @@ mod tests {
             .and_then(|line| line.split_whitespace().nth(1))
             .and_then(|status| status.parse().ok())
             .unwrap_or(0)
+    }
+
+    #[test]
+    fn p12_upload_is_validated_and_cleaned_up() {
+        let server = leaked();
+        let mut reader = subscribe(server, None);
+        let selection = asked(server, |server| server.choose_p12());
+        let question = until(&mut reader, "ask");
+        assert_eq!(question["kind"], "p12");
+        let id = question["id"].as_u64().unwrap();
+        let token = "0123456789abcdef0123456789abcdef";
+        // DER-encoded PKCS#12 starts with 30 82.
+        let bytes = [0x30, 0x82, 0x01, 0x00, 0x00];
+        // A complete upload with the wrong magic is rejected.
+        let wrong = [0x50, 0x4b, 0x03, 0x04];
+        assert_eq!(upload_chunk(server, id, token, wrong.len(), 0, &wrong), 422);        assert_eq!(
+            upload_chunk(server, id, token, bytes.len(), 0, &bytes[..]),
+            204
+        );
+        assert_eq!(until(&mut reader, "answered")["id"], id);
+        // The password question follows the upload.
+        let pass = until(&mut reader, "ask");
+        assert_eq!(pass["kind"], "secret");
+        let pass_id = pass["id"].as_u64().unwrap();
+        assert_eq!(reply(server, pass_id, json!({"value": "hunter2"})), 204);
+        let Some(upload) = selection.join().unwrap() else {
+            panic!("expected the uploaded P12");
+        };
+        assert_eq!(std::fs::read(&upload.path).unwrap(), bytes);
+        assert_eq!(upload.password, "hunter2");
+        let path = upload.path.clone();
+        drop(upload);
+        assert!(!path.exists(), "staged P12 is removed after the run");
     }
 
     #[test]

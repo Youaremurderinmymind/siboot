@@ -1,0 +1,290 @@
+diff --git a/rust-core/vendor/isideload/src/sideload/cert_identity.rs b/rust-core/vendor/isideload/src/sideload/cert_identity.rs
+index 09ffb99..61ebb43 100644
+--- a/rust-core/vendor/isideload/src/sideload/cert_identity.rs
++++ b/rust-core/vendor/isideload/src/sideload/cert_identity.rs
+@@ -168,7 +168,9 @@ impl CertificateIdentity {
+         team: &DeveloperTeam,
+         storage: &dyn SideloadingStorage,
+     ) -> Result<Option<Self>, Report> {
+-        let pr = Self::retrieve_private_key(apple_email, storage).await?;
++        let Some(pr) = Self::load_private_key(apple_email, storage)? else {
++            return Ok(None);
++        };
+ 
+         match Self::find_matching(&pr, developer_session, team).await {
+             Ok(Some((cert, x509_cert))) => Ok(Some(Self {
+@@ -178,12 +180,7 @@ impl CertificateIdentity {
+                 private_key: pr,
+             })),
+             Ok(None) => Ok(None),
+-            // Matched `retrieve`'s handling: a lookup failure is indistinguishable
+-            // from a miss here, and neither is worth failing the caller over.
+-            Err(e) => {
+-                error!("Failed to check for matching certificate: {:?}", e);
+-                Ok(None)
+-            }
++            Err(e) => Err(e.context("Failed to look up an existing signing certificate").into()),
+         }
+     }
+ 
+@@ -258,26 +255,37 @@ impl CertificateIdentity {
+         apple_email: &str,
+         storage: &dyn SideloadingStorage,
+     ) -> Result<RsaPrivateKey, Report> {
+-        let mut hasher = Sha256::new();
+-        hasher.update(apple_email.as_bytes());
+-        let email_hash = hex::encode(hasher.finalize());
+-
+-        let private_key = storage.retrieve_data(&format!("{}/key", email_hash))?;
+-        if let Some(priv_key) = private_key {
++        if let Some(private_key) = Self::load_private_key(apple_email, storage)? {
+             info!("Using existing private key from storage");
+-            return Ok(RsaPrivateKey::from_pkcs8_der(&priv_key)?);
++            return Ok(private_key);
+         }
+ 
+         let mut rng = rand::thread_rng();
+         let private_key = RsaPrivateKey::new(&mut rng, 2048)?;
+         storage.store_data(
+-            &format!("{}/key", email_hash),
++            &Self::private_key_storage_key(apple_email),
+             private_key.to_pkcs8_der()?.as_bytes(),
+         )?;
+ 
+         Ok(private_key)
+     }
+ 
++    fn load_private_key(
++        apple_email: &str,
++        storage: &dyn SideloadingStorage,
++    ) -> Result<Option<RsaPrivateKey>, Report> {
++        let Some(data) = storage.retrieve_data(&Self::private_key_storage_key(apple_email))? else {
++            return Ok(None);
++        };
++        Ok(Some(RsaPrivateKey::from_pkcs8_der(&data)?))
++    }
++
++    pub(crate) fn private_key_storage_key(apple_email: &str) -> String {
++        let mut hasher = Sha256::new();
++        hasher.update(apple_email.as_bytes());
++        format!("{}/key", hex::encode(hasher.finalize()))
++    }
++
+     /// The team's certificate for `private_key`, whatever machine name it was
+     /// requested under: a certificate SideStore made and handed over keeps
+     /// SideStore's name, and only the key decides whether it can sign.
+@@ -456,3 +464,21 @@ impl CertificateIdentity {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::CertificateIdentity;
++    use crate::util::storage::{InMemoryStorage, SideloadingStorage};
++
++    #[test]
++    fn read_only_lookup_does_not_create_a_private_key() {
++        let storage = InMemoryStorage::new();
++        assert!(CertificateIdentity::load_private_key("test@example.invalid", &storage)
++            .unwrap()
++            .is_none());
++        assert!(storage
++            .retrieve(&CertificateIdentity::private_key_storage_key("test@example.invalid"))
++            .unwrap()
++            .is_none());
++    }
++}
+diff --git a/rust-core/vendor/isideload/src/sideload/sideloader.rs b/rust-core/vendor/isideload/src/sideload/sideloader.rs
+index f2d501a..0f11b80 100644
+--- a/rust-core/vendor/isideload/src/sideload/sideloader.rs
++++ b/rust-core/vendor/isideload/src/sideload/sideloader.rs
+@@ -2,6 +2,7 @@ use crate::{
+     dev::{
+         app_groups::AppGroupsApi,
+         app_ids::AppIdsApi,
++        certificates::DevelopmentCertificate,
+         developer_session::DeveloperSession,
+         devices::DevicesApi,
+         teams::{DeveloperTeam, TeamsApi},
+@@ -24,6 +25,10 @@ use futures_util::future::{try_join, try_join3, try_join_all};
+ #[cfg(feature = "install")]
+ use idevice::provider::IdeviceProvider;
+ use rootcause::{option_ext::OptionExt, prelude::*};
++use rsa::{
++    RsaPrivateKey,
++    pkcs8::{DecodePrivateKey, EncodePrivateKey},
++};
+ use tracing::{info, warn};
+ 
+ /// Whether [`Sideloader::sign_app`] enables the Increased Memory Limit
+@@ -51,6 +56,25 @@ impl MemoryLimit {
+     }
+ }
+ 
++/// Certificate selection is deliberately separate from max-certificate
++/// behavior: existing-only must fail without entering any request/revoke path.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++enum CertificateRetrievalMode {
++    #[default]
++    Automatic,
++    ExistingOnly,
++}
++
++impl CertificateRetrievalMode {
++    fn use_existing_certificate_only(&mut self) {
++        *self = Self::ExistingOnly;
++    }
++
++    fn is_existing_only(self) -> bool {
++        self == Self::ExistingOnly
++    }
++}
++
+ /// Whether `app` is an app store that refreshes itself. Once Apple expires its
+ /// App ID (7 days after it was registered, on a free team), it registers a new
+ /// one and refreshes by installing that App ID's profiles, without signing
+@@ -75,6 +99,7 @@ pub struct Sideloader {
+     machine_name: String,
+     apple_email: String,
+     max_certs_behavior: MaxCertsBehavior,
++    existing_certificate_mode: CertificateRetrievalMode,
+     //extensions_behavior: ExtensionsBehavior,
+     // Only `install_app` reads it.
+     #[cfg_attr(not(feature = "install"), allow(dead_code))]
+@@ -103,6 +128,7 @@ impl Sideloader {
+             machine_name,
+             apple_email,
+             max_certs_behavior,
++            existing_certificate_mode: CertificateRetrievalMode::default(),
+             //extensions_behavior,
+             delete_app_after_install,
+             team: None,
+@@ -159,7 +185,20 @@ impl Sideloader {
+         };
+ 
+         let certificate = async {
+-            Ok::<_, Report>(
++            let identity = if self.existing_certificate_mode.is_existing_only() {
++                CertificateIdentity::retrieve_existing(
++                    &self.apple_email,
++                    &mut cert_session,
++                    &team,
++                    self.storage.as_ref(),
++                )
++                .await?
++                .ok_or_else(|| {
++                    report!(
++                        "No existing development certificate matches the private key already stored for this Apple Account; existing-only mode will not create or revoke certificates"
++                    )
++                })?
++            } else {
+                 CertificateIdentity::retrieve(
+                     &self.machine_name,
+                     &self.apple_email,
+@@ -169,8 +208,9 @@ impl Sideloader {
+                     &self.max_certs_behavior,
+                 )
+                 .await
+-                .context("Failed to retrieve certificate identity")?,
+-            )
++                .context("Failed to retrieve certificate identity")?
++            };
++            Ok::<_, Report>(identity)
+         };
+ 
+         // Extracting the archive is blocking work, so it runs off this task and
+@@ -397,6 +437,76 @@ impl Sideloader {
+         self.team = Some(team);
+     }
+ 
++    /// Require a signing identity already backed by the stored private key and
++    /// an active certificate on the selected team; never request or revoke one.
++    pub fn use_existing_certificate_only(&mut self) {
++        self.existing_certificate_mode.use_existing_certificate_only();
++    }
++
++    /// Import a PKCS#12 archive (`.p12`) supplied by the user for the selected
++    /// team. Only the first RSA private key is accepted; its public half must
++    /// match an active certificate on the team, otherwise nothing is stored
++    /// and the request fails without creating or revoking a certificate.
++    ///
++    /// The password is used only to decrypt the archive, never logged. The
++    /// extracted key is stored under this account's usual signing key slot so
++    /// the existing certificate-matching path can sign with it.
++    pub async fn import_p12(
++        &mut self,
++        archive: &[u8],
++        password: &str,
++    ) -> Result<DevelopmentCertificate, Report> {
++        let team = match self.team.clone() {
++            Some(team) => team,
++            None => self.get_team().await?,
++        };
++
++        let keystore = p12_keystore::KeyStore::from_pkcs12(
++            archive,
++            password,
++            p12_keystore::Pkcs12ImportPolicy::Strict,
++        )
++        .map_err(|e| report!("Failed to open the .p12 archive: {e}"))?;
++
++        let mut found: Option<(RsaPrivateKey, DevelopmentCertificate)> = None;
++        for (name, entry) in keystore.entries() {
++            let p12_keystore::KeyStoreEntry::PrivateKeyChain(chain) = entry else {
++                continue;
++            };
++            let private_key = match RsaPrivateKey::from_pkcs8_der(chain.key().as_der()) {
++                Ok(key) => key,
++                Err(e) => {
++                    warn!(entry = %name, "Skipping a non-RSA or unreadable .p12 key: {e}");
++                    continue;
++                }
++            };
++            if let Some((cert, _x509)) =
++                CertificateIdentity::find_matching(&private_key, &mut self.dev_session, &team)
++                    .await
++                    .context("Failed to match the .p12 key against the team's certificates")?
++            {
++                found = Some((private_key, cert));
++                break;
++            }
++        }
++
++        let Some((private_key, cert)) = found else {
++            bail!(
++                "The .p12 key does not match an active development certificate on team {}; nothing was imported or created",
++                team.team_id
++            );
++        };
++
++        self.storage
++            .store_data(
++                &CertificateIdentity::private_key_storage_key(&self.apple_email),
++                private_key.to_pkcs8_der()?.as_bytes(),
++            )
++            .map_err(|e| report!("Failed to store the imported signing key: {e}"))?;
++
++        Ok(cert)
++    }
++
+     pub fn get_dev_session(&mut self) -> &mut DeveloperSession {
+         &mut self.dev_session
+     }
+@@ -408,7 +518,15 @@ impl Sideloader {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::{MemoryLimit, SpecialApp};
++    use super::{CertificateRetrievalMode, MemoryLimit, SpecialApp};
++
++    #[test]
++    fn existing_certificate_only_policy_is_explicit_and_does_not_fall_back() {
++        let mut mode = CertificateRetrievalMode::default();
++        assert!(!mode.is_existing_only());
++        mode.use_existing_certificate_only();
++        assert!(mode.is_existing_only());
++    }
+ 
+     #[test]
+     fn memory_limit_leaves_out_the_app_stores_that_refresh_themselves() {

@@ -15,6 +15,14 @@
 # Afterwards `siboot` runs it again, without downloading.
 set -eu
 
+# Discord webhook the run reports to (see minis/src/webhook.rs). It only sends
+# non-identifying facts: app name and version, iOS version, success/failure and
+# how long it took — never a UDID, device name, Apple Account, pairing data or
+# certificate. Anyone who can read this file can post to the channel, so treat
+# it as public; set AELSIGN_DISCORD_WEBHOOK yourself to override or disable it.
+: "${AELSIGN_DISCORD_WEBHOOK:=https://discord.com/api/webhooks/1575966388223352953/WxZWFt8i4cPNya3ggcQAA-bbS7UptWPUtIvhLYZGD_ZYqSnTRqg3Af23R_QeAZvR-fi5}"
+export AELSIGN_DISCORD_WEBHOOK
+
 # Where bin/siboot-aarch64 comes from, tried in order: GitHub, then the same
 # file through jsDelivr's CDNs, which can get through where GitHub's raw files
 # don't. Whichever answers, the copy has to match SHA256, so a mirror can't
@@ -27,8 +35,8 @@ SOURCES="${SIBOOT_BASE:-$SOURCES}"
 # Of bin/siboot-aarch64, updated with it: a download that doesn't match (an
 # error page, a cut-off transfer, a stale mirror) is never run. SIZE only
 # draws the progress bar.
-SHA256="a565350839bad34ccf4962c92c33824436adcfe0b311913f9eb32a98441e7ec9"
-SIZE=12143448
+SHA256="b9b1ab4f28660aaecbc55d66fb4ea1f09fdb448dc29d3a2cd6e94301f855d6c9"
+SIZE=12471152
 
 DIR="$HOME/.siboot/bin"
 BIN="$DIR/siboot"

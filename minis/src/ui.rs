@@ -455,6 +455,19 @@ pub fn warn(msg: &str) {
     }
 }
 
+/// Tell the page which device it is signing for: name, model, iOS and UDID.
+/// Used by the web page to draw the device and show its UDID.
+pub fn device(name: &str, product_type: &str, ios_version: &str, udid: &str) {
+    record(&format!("      device: {name} ({product_type}) iOS {ios_version} · UDID {udid}"));
+    web::send(json!({
+        "t": "device",
+        "name": name,
+        "product_type": product_type,
+        "ios_version": ios_version,
+        "udid": udid,
+    }));
+}
+
 /// Useful only when diagnosing. Shown with `--verbose`, which is plain, and
 /// on the page under Show details.
 pub fn detail(msg: &str) {

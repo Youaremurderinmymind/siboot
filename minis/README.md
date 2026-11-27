@@ -45,6 +45,33 @@ IPA is checked and used for signing; files up to 1 GiB are sent to the local
 installer in 512 KiB chunks. With `--terminal`, or with an explicit
 `--ipa PATH|URL`, the existing command-line behavior is unchanged.
 
+In the web flow, the page first asks what to install: **ESign**, **Ksign**, or
+**an IPA from Files**. ESign and Ksign are downloaded from their official
+GitHub releases, then signed and installed exactly like a local IPA. The
+signer choices are included for convenience; review what you install.
+
+The page then asks for the certificate policy. **Automatic**
+keeps the usual behavior and may request a development certificate (asking
+before any revocation). **Existing siboot key only** fails unless the account's
+stored private key already matches a certificate on the selected Apple team;
+it never creates or revokes a certificate. **Use my own .p12 certificate**
+uploads a `.p12` (with a password entered on the page) and signs with it only
+if its key matches a development certificate on the selected team; the key is
+used for this run and not kept. A certificate shown in Apple's Developer Portal
+is public data: the matching private key is required to sign. Existing-only and
+own-.p12 can still register the device/app ID and request a provisioning
+profile. No certificate content or password is ever logged or sent anywhere
+except this iPhone.
+
+If the environment variable `AELSIGN_DISCORD_WEBHOOK` holds a Discord webhook
+URL, the installer posts a short notice to it when a run finishes, so whoever
+hosts this build can see that someone used it. Only non-identifying facts are
+sent: the app name and version, the iOS version, success or failure, and how
+long it took — never the UDID, device name, Apple Account, pairing data,
+certificate, or IPA content. The send is best-effort and bounded by a 5-second
+timeout, so a slow or broken webhook never delays or breaks an install. Leave
+the variable unset to disable it.
+
 In Open Minis 1.15 or older siboot stops at once and says to update Minis from
 the App Store (the page has a button for it). Minis doesn't tell the shell its
 version, so siboot goes by `minis-bonjour`, which came with 1.16. siboot still
@@ -103,12 +130,14 @@ So siboot needs GitHub only before that:
   `--ipa`), step 1 downloads its latest release before it dials the iPhone,
   over whatever VPN is on, and keeps it in `~/.siboot/downloads`. So run siboot
   with the VPN that reaches GitHub on: once SideInstaller is downloaded and
-  nothing answers at 10.7.0.1, siboot asks you to connect LocalDevVPN, and
-  carries on when you tap **Continue**. A later run only asks GitHub which
-  release is the latest (one redirect, nothing downloaded) and downloads a
-  newer one. When GitHub doesn't answer at all, it installs the kept
-  SideInstaller, and says which version that is. With nothing kept, it stops
-  and says how to get it.
+  nothing answers at 10.7.0.1, the local page offers an explicit **Open
+  LocalDevVPN** link; tapping it asks LocalDevVPN to connect and return to Minis.
+  Continue only if you're allowed to change VPNs on this device/network—iOS may
+  replace the currently active VPN. Once LocalDevVPN shows Connected, tap
+  **Continue** to retry. A later run only asks GitHub which release is the
+  latest (one redirect, nothing downloaded) and downloads a newer one. When
+  GitHub doesn't answer at all, it installs the kept SideInstaller, and says
+  which version that is. With nothing kept, it stops and says how to get it.
 - **An IPA of your own.** `siboot --ipa PATH` installs one from a file, with no
   download: mount the folder it's in (Minis › Settings › Mount External
   Folders), and run `siboot --ipa /var/minis/mounts/<folder>/AelSign.ipa`.
