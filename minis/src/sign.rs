@@ -63,7 +63,7 @@ pub async fn sign(
 /// Advice for the refusals SideInstaller's own signing explains.
 fn sign_advice(text: &str) -> String {
     if text.contains("No existing development certificate matches") {
-        "The chosen certificate's private key doesn't match an active development certificate on this Apple team. Nothing was created, imported, or revoked; choose a .p12 whose key belongs to a certificate on this team.".into()
+        "The chosen certificate's private key doesn't match an active development certificate on this Apple team. Its matching private key is required to sign; nothing was created, imported, or revoked. Choose a .p12 whose key belongs to a certificate on this team.".into()
     } else if text.starts_with("device registration failed") {
         "Apple wouldn't register this iPhone with your developer team, so it won't issue a \
          provisioning profile."

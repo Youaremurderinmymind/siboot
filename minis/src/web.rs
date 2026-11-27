@@ -1543,8 +1543,9 @@ mod tests {
         let token = "0123456789abcdef0123456789abcdef";
         // DER-encoded PKCS#12 starts with 30 82.
         let bytes = [0x30, 0x82, 0x01, 0x00, 0x00];
-        assert_eq!(upload_chunk(server, id, token, bytes.len(), 0, b"xx"), 422);
-        assert_eq!(
+        // A complete upload with the wrong magic is rejected.
+        let wrong = [0x50, 0x4b, 0x03, 0x04];
+        assert_eq!(upload_chunk(server, id, token, wrong.len(), 0, &wrong), 422);        assert_eq!(
             upload_chunk(server, id, token, bytes.len(), 0, &bytes[..]),
             204
         );
