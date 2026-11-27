@@ -515,6 +515,22 @@ async fn pipeline(args: &Args) -> Result<()> {
         } else {
             None
         };
+    let certificate_mode = if args.command == Command::All && web::page().is_some() {
+        web::choose_certificate_mode()
+            .ok_or_else(|| Fail::by_user("Stopped before choosing a signing certificate mode."))?
+    } else {
+        sign::CertificateMode::Automatic
+    };
+    // The page uploads the chosen `.p12` (and its password) now, so it's ready
+    // for signing once we've signed in; the temp file is removed at the end.
+    let own_p12 = if certificate_mode == sign::CertificateMode::OwnP12 {
+        Some(
+            web::choose_p12()
+                .ok_or_else(|| Fail::by_user("Stopped before choosing a signing certificate."))?,
+        )
+    } else {
+        None
+    };
     let effective_args = match &uploaded_ipa {
         Some(upload) => Args {
             ipa: Some(upload.path.to_string_lossy().into_owned()),
@@ -584,11 +600,28 @@ async fn pipeline(args: &Args) -> Result<()> {
 
     ui::step(4, "Signing in to your Apple Account");
     let mut session = account::sign_in(args).await?;
+    if let Some(p12) = &own_p12 {
+        ui::status("checking your signing certificate");
+        let archive = std::fs::read(&p12.path)
+            .map_err(|e| Fail::new("Couldn't read the chosen .p12 certificate.", e.to_string()))?;
+        session
+            .sideloader
+            .import_p12(&archive, &p12.password)
+            .await
+            .map_err(|e| {
+                let text = crate::error_text::report_text(&e);
+                Fail::new(
+                    "The .p12 certificate couldn't be used with this Apple team. It must match a development certificate on the team, and its key is never sent anywhere except this iPhone.",
+                    text,
+                )
+            })?;
+        ui::done("certificate accepted");
+    }
     ui::done(&session.team);
 
     ui::step(5, "Signing the selected IPA for this iPhone");
     let ipa = ipa.ok_or_else(|| Fail::new("siboot has no IPA to sign.", "step 1 got none"))?;
-    let signed = sign::sign(&mut session, &ipa.path, &device).await?;
+    let signed = sign::sign(&mut session, &ipa.path, &device, certificate_mode).await?;
     ui::done(&match &signed.version {
         Some(version) => format!("{} {version} signed", signed.name),
         None => format!("{} signed", signed.name),

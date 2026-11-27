@@ -429,19 +429,24 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
   }
 
   // A local IPA is sent in fixed-size requests, so neither Safari nor the
-  // loopback server has to hold the whole package in memory.
-  async function uploadIpa(file, id, status, fill, track, picker) {
-    const maxSize = 1024 * 1024 * 1024;
+  // loopback server has to hold the whole package in memory. P12 files are
+  // uploaded the same way, with their smaller size limit and a password.
+  async function uploadFile(kind, file, id, status, fill, track, picker) {
+    const maxSize = kind === "p12" ? 16 * 1024 * 1024 : 1024 * 1024 * 1024;
+    const limit = kind === "p12" ? "16 MB" : "1 GiB";
+    const magicErr = kind === "p12"
+      ? "That file isn't a valid .p12 certificate archive. Choose another file."
+      : "That file isn't a valid IPA ZIP. Choose another file.";
     const chunkSize = 512 * 1024;
     if (!file.size || file.size > maxSize) {
-      status.textContent = file.size ? "This IPA is larger than the 1 GiB limit." : "This file is empty.";
+      status.textContent = file.size ? "This file is larger than the " + limit + " limit." : "This file is empty.";
       picker.value = "";
-      return;
+      return false;
     }
     if (!globalThis.crypto || !crypto.getRandomValues) {
       status.textContent = "This browser can't securely start an upload. Reopen the page in Minis.";
       picker.value = "";
-      return;
+      return false;
     }
     const token = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -463,8 +468,8 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
           cache: "no-store",
         });
         if (!reply.ok) {
-          const why = reply.status === 413 ? "The IPA is larger than the 1 GiB limit."
-            : reply.status === 422 ? "That file isn't a valid IPA ZIP. Choose another file."
+          const why = reply.status === 413 ? "This file is larger than the " + limit + " limit."
+            : reply.status === 422 ? magicErr
             : reply.status === 409 ? "The upload got out of sequence. Choose the file again."
             : "Upload failed (HTTP " + reply.status + "). Choose the file again.";
           throw new Error(why);
@@ -474,11 +479,13 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         track.setAttribute("aria-valuenow", String(percent));
         status.textContent = "Uploading " + file.name + " · " + mb(end) + " of " + mb(file.size) + " MB";
       }
-      status.textContent = "IPA uploaded; checking the package…";
+      status.textContent = (kind === "p12" ? "Certificate uploaded; checking the key…" : "IPA uploaded; checking the package…");
+      return true;
     } catch (err) {
       busy(false);
       picker.value = "";
       status.textContent = err instanceof Error ? err.message : "Upload failed. Choose the file again.";
+      return false;
     }
   }
 
@@ -522,6 +529,39 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         fill.style.width = "0%";
         track.setAttribute("aria-valuenow", "0");
         uploadIpa(file, e.id, status, fill, track, picker);
+      });
+      askEl.append(label, choose, hint, uploadProgress, status);
+      actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
+    } else if (e.kind === "p12") {
+      const picker = make("input", "file-input");
+      picker.type = "file";
+      picker.accept = ".p12,application/x-pkcs12,application/octet-stream";
+      picker.setAttribute("aria-label", "Choose a .p12 certificate from Files");
+      const label = make("label", "field");
+      label.append(make("span", "field-label", "Choose a .p12 certificate from Files"));
+      label.append(picker);
+      const choose = button("Choose .p12…", "primary", "button", () => picker.click());
+      const hint = make("p", "ipa-hint", "A .p12 holds the private key for signing. Its password is asked separately and never stored.");
+      const uploadProgress = make("div", "ipa-progress");
+      uploadProgress.hidden = true;
+      const track = make("div", "track");
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-label", "Certificate upload progress");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-valuenow", "0");
+      const fill = make("div", "fill");
+      track.append(fill);
+      uploadProgress.append(track);
+      const status = make("p", "ipa-status");
+      status.setAttribute("role", "status");
+      picker.addEventListener("change", () => {
+        const file = picker.files && picker.files[0];
+        if (!file) return;
+        uploadProgress.hidden = false;
+        fill.style.width = "0%";
+        track.setAttribute("aria-valuenow", "0");
+        uploadFile("p12", file, e.id, status, fill, track, picker);
       });
       askEl.append(label, choose, hint, uploadProgress, status);
       actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
