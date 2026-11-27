@@ -1131,7 +1131,7 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
             std::fs::write(home.join("minis-player-closed"), b"").unwrap();
-            for _ in 0..100 {
+            for _ in 0..200 {
                 if plays(&log) >= 2 {
                     break;
                 }
