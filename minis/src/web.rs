@@ -1177,7 +1177,8 @@ mod tests {
         assert!(body.contains("<title>AelSign</title>"));
         assert!(body.contains("class=\"badge\">AelSign</span>"));
         assert!(body.contains("Based on siboot by FrizzleM"));
-        assert!(body.contains("Choose an IPA you trust"));
+        assert!(body.contains("Choose an IPA from Files"));
+        assert!(body.contains("Choose apps you trust"));
         assert!(body.contains("uploadIpa"));
         assert_eq!(header(&headers, "content-security-policy"), Some(CSP));
         assert_eq!(header(&headers, "referrer-policy"), Some("no-referrer"));
