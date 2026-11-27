@@ -1,10 +1,10 @@
-# siboot for Open Minis
+# AelSign installer for Open Minis
 
-Installs SideInstaller onto the iPhone it runs on, signed with your own Apple
-Account, from the Linux shell of [Open Minis](https://apps.apple.com/app/id6759188481)
-(free, App Store): no computer, no certificate, no other app to pair with. Since
-Open Minis 1.16 (App Store, 2026-11-14) siboot pairs the iPhone with itself too
-([below](#pairing-in-minis)), so it needs 1.16 or later.
+Installs a selected IPA onto this iPhone, signed with your own Apple Account,
+from the Linux shell of [Open Minis](https://apps.apple.com/app/id6759188481)
+(free, App Store): no computer or paid certificate required. This fork retains
+the original siboot pairing/signing code and adds a local IPA picker for Minis.
+Open Minis 1.16 or later is required for self-pairing.
 
 ## Running it
 
@@ -12,7 +12,7 @@ Needs iOS 27 or later, Developer Mode on, Wi-Fi, LocalDevVPN (App Store)
 connected, and Open Minis 1.16 or later. Then, in Open Minis's terminal:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/FrizzleM/siboot/main/minis/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/Youaremurderinmymind/siboot/main/minis/install.sh | sh
 ```
 
 Where GitHub is blocked, see [below](#where-github-is-blocked).
@@ -25,7 +25,9 @@ scroll to the bottom, tap **Pair with siboot**, and enter your passcode, then
 the 6-digit code siboot shows (it also comes as a notification). A player opens
 over Minis meanwhile: leave it open, it keeps Minis running while you're in
 Settings. Go back to Minis once Settings says it's paired. After that siboot
-uses the pairing file it saved and doesn't ask. Then your Apple Account email,
+uses the pairing file it saved and doesn't ask. Only use an Apple Account you
+own or have permission to use; keep its password and verification codes private
+and never send them in chat. Then your Apple Account email,
 password and verification code, and, if the account is on more than one
 developer team (a paid membership and the free team every account has, say),
 which team signs ([below](#more-than-one-team)). The next time, siboot offers
@@ -33,8 +35,15 @@ the Apple Accounts that signed in before, and asks for no password or code
 while Apple's sign-in lasts ([below](#saved-apple-accounts)). Keep Minis open until siboot
 says it's done: iOS pauses it in the background. The first time, trust your
 Apple Account in Settings › General › VPN & Device Management. Free accounts'
-apps last 7 days; SideInstaller can renew itself from then on. A paid team's
+apps last 7 days; AelSign can renew itself from then on. A paid team's
 last a year.
+
+In Open Minis, when no `--ipa` is given, the local page requires selecting an
+`.ipa` from Files before the install can continue. Cancel stops the run; it
+never silently switches to the upstream SideInstaller release. The selected
+IPA is checked and used for signing; files up to 1 GiB are sent to the local
+installer in 512 KiB chunks. With `--terminal`, or with an explicit
+`--ipa PATH|URL`, the existing command-line behavior is unchanged.
 
 In Open Minis 1.15 or older siboot stops at once and says to update Minis from
 the App Store (the page has a button for it). Minis doesn't tell the shell its
@@ -51,6 +60,24 @@ where GitHub doesn't answer, checks it against the SHA-256 the script carries,
 keeps it at `~/.siboot/bin/siboot` (and `/usr/local/bin/siboot`), and runs it.
 After that, `siboot` on its own runs it again without downloading.
 
+This fork's **Build Open Minis installer** GitHub Action runs on code changes to
+`main` and `aelsign-web-picker` (or manually), builds the static ARM64 binary
+and rootshell pairing WASM, and commits both together with their matching
+checksum/size metadata. The installer begins with an all-zero checksum and
+refuses the old binary until a build succeeds. In the fork's Settings › Actions,
+enable Actions and set workflow permissions to **Read and write permissions**
+so the bot can commit generated artifacts.
+
+After the review-branch Action succeeds, test that branch in Open Minis with:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/Youaremurderinmymind/siboot/aelsign-web-picker/minis/install.sh | SIBOOT_BASE='https://raw.githubusercontent.com/Youaremurderinmymind/siboot/aelsign-web-picker/minis' sh
+```
+
+After the PR is reviewed and merged, use the normal `main` command at the top.
+The CI tests the server and uploader, but cannot test the iOS Files picker in
+Open Minis; verify that the picker opens on-device before relying on it.
+
 ## Where GitHub is blocked
 
 siboot comes from GitHub, and so does SideInstaller, and GitHub is blocked in
@@ -66,24 +93,25 @@ So siboot needs GitHub only before that:
   answer, get the script through jsDelivr too:
 
   ```sh
-  wget -qO- https://fastly.jsdelivr.net/gh/FrizzleM/siboot@main/minis/install.sh | sh
+  wget -qO- https://fastly.jsdelivr.net/gh/Youaremurderinmymind/siboot@main/minis/install.sh | sh
   ```
 
   jsDelivr can be up to 12 hours behind GitHub, so that may install the
   siboot before the newest. It's blocked at times too: if nothing answers, turn
   on a VPN that reaches GitHub for this.
-- **SideInstaller.** Step 1 downloads its latest release before it dials the
-  iPhone, over whatever VPN is on, and keeps it in `~/.siboot/downloads`. So
-  run siboot with the VPN that reaches GitHub on: once SideInstaller is
-  downloaded and nothing answers at 10.7.0.1, siboot asks you to connect
-  LocalDevVPN, and carries on when you tap **Continue**. A later run only asks
-  GitHub which release is the latest (one redirect, nothing downloaded) and
-  downloads a newer one. When GitHub doesn't answer at all, it installs the
-  kept SideInstaller, and says which version that is. With nothing kept, it
-  stops and says how to get it.
+- **SideInstaller.** With the CLI's default source (no web picker and no
+  `--ipa`), step 1 downloads its latest release before it dials the iPhone,
+  over whatever VPN is on, and keeps it in `~/.siboot/downloads`. So run siboot
+  with the VPN that reaches GitHub on: once SideInstaller is downloaded and
+  nothing answers at 10.7.0.1, siboot asks you to connect LocalDevVPN, and
+  carries on when you tap **Continue**. A later run only asks GitHub which
+  release is the latest (one redirect, nothing downloaded) and downloads a
+  newer one. When GitHub doesn't answer at all, it installs the kept
+  SideInstaller, and says which version that is. With nothing kept, it stops
+  and says how to get it.
 - **An IPA of your own.** `siboot --ipa PATH` installs one from a file, with no
   download: mount the folder it's in (Minis › Settings › Mount External
-  Folders), and run `siboot --ipa /var/minis/mounts/<folder>/SideInstaller.ipa`.
+  Folders), and run `siboot --ipa /var/minis/mounts/<folder>/AelSign.ipa`.
 
 Apple's sign-in server and the anisette servers aren't GitHub, but step 4
 reaches them with LocalDevVPN on, so they have to answer without the other
@@ -122,33 +150,16 @@ made-up run, on a Mac and without an iPhone (`-- stop`, `-- developer-mode`,
 
 ## The page
 
-In Open Minis siboot shows the run as a page in Minis's own browser, to tap
-rather than type (since 0.17.0; `--terminal` keeps it in the terminal, and
-`--web` serves the page even where there's no Minis). siboot serves the page
-itself, on this iPhone's loopback, and opens it with
-Minis's `minis-open`, which shows it in a sheet over the terminal. Minis stays
-in front, so iOS doesn't pause it. Safari wouldn't do: behind it, iOS pauses
-Minis within seconds, and a paused app takes the connection and never answers.
+In Open Minis siboot shows the run as the AelSign page in Minis's own browser,
+to tap rather than type (since 0.17.0; `--terminal` keeps it in the terminal,
+and `--web` serves the page even where there's no Minis). The AelSign page is
+served by the installer on this iPhone's 127.0.0.1 loopback, not hosted on a
+public website; it opens with Minis's `minis-open`, which shows it in a sheet
+over the terminal. Minis stays in front, so iOS doesn't pause it. Safari
+wouldn't do: behind it, iOS pauses Minis within seconds, and a paused app takes
+the connection and never answers.
 
-The page shows what the live screen shows: the steps, the running one with what
-it's doing, for how long and a progress bar, what worked (folded away once its
-step is done), the warnings where they happened, and the box the run ends in,
-which has a button that opens SideInstaller once it's installed. Show details
-adds what `--verbose` adds. The questions are fields and buttons: the email
-with the email keyboard, the password as dots, the codes in boxes that send
-themselves at the sixth digit (marked as one-time codes, which iOS can offer to
-fill from Messages), Other ways for Apple's code, a button for each team when
-there's a choice, and yes or no. Pairing shows
-what to do in Settings on a card with **Start pairing**, then the pairing code
-in large digits on a card of its own while Settings waits for it. Stop, tapped
-twice, stops the run as Ctrl-C does.
-
-The terminal under the sheet keeps plain lines, as with `--plain`, and return
-there opens the page again after it's been swiped away. Where there's no
-`minis-open`, siboot prints the page's address instead. A page opened again
-draws the same screen: it gets every event since the start. siboot sends one
-every 5 s while it's quiet, so after 15 s with nothing the page says siboot
-isn't answering (iOS has paused Minis) and to go back to Minis.
+The page shows the live steps, status, elapsed time and progress, with warnings and details available through **Show details**. For a full run with no `--ipa`, it asks you to choose an `.ipa` from Files before continuing; it does not silently switch to the upstream app. The selected file is uploaded to the local installer in chunks. Progress and log events continue to appear in the same page. Pairing is handed into AelSign (or the legacy SideInstaller bundle ID) only; other chosen apps are installed without receiving the pairing file. The terminal remains open under the page; press Return there to reopen the page if it is dismissed.
 
 How the page is kept to this iPhone, and to itself ([`src/web.rs`](src/web.rs)):
 
@@ -158,8 +169,13 @@ How the page is kept to this iPhone, and to itself ([`src/web.rs`](src/web.rs)):
   and any website open in a browser on it, can reach a loopback port, but none
   can guess them.
 - The Host header must name the loopback and the port (no DNS rebinding), and
-  answers are POSTed as JSON, from the page's own origin when the browser names
-  one, so a form on another site can't send one.
+  answers are POSTed as JSON from the page's own origin when the browser names
+  one. File upload is a separate same-origin binary route; cross-origin
+  preflights are refused.
+- A selected IPA is sent in 512 KiB chunks (up to 1 GiB total), staged in a
+  private temporary file, checked for ZIP magic and removed when the run ends
+  or the upload is cancelled. The IPA's contents and chosen filename aren't
+  added to the event log.
 - The page loads nothing from anywhere else, can't be framed, and sends no
   referrer: its address carries the key.
 - An answer goes to the question that asked for it and no further. It's never
@@ -190,13 +206,13 @@ file is.
 
 | # | Step | How |
 |---|---|---|
-| 1 | Check | Apple's sign-in server answers; SideInstaller's latest release is downloaded, or the copy kept from an earlier run when that's the latest or GitHub doesn't answer ([above](#where-github-is-blocked)); the iPhone answers RPPairing on `10.7.0.1:49152` through LocalDevVPN, or on the port its pairing service has instead ([below](#the-pairing-port)), and when nothing answers, siboot asks for LocalDevVPN and dials again |
+| 1 | Check | Apple's sign-in server answers; the selected IPA is checked when one comes from Files or `--ipa`, otherwise SideInstaller's latest release is downloaded/kept ([above](#where-github-is-blocked)); the iPhone answers RPPairing on `10.7.0.1:49152` through LocalDevVPN, or on the port its pairing service has instead ([below](#the-pairing-port)), and when nothing answers, siboot asks for LocalDevVPN and dials again |
 | 2 | Pairing | the file saved in `~/.siboot` on an earlier run, while the iPhone accepts it; else the one siboot-pair offers on `127.0.0.1:61207`, for its transfer code (20 s for each answer), when it's offering; else a new pairing, made here ([below](#pairing-in-minis)); then pair-verified with the iPhone |
 | 3 | Connect | pair-verify → `createListener` → TLS-PSK → CDTunnel → software TCP → RSD, as `tunnel_create_rppairing_multihost` does; lockdownd gives the UDID |
 | 4 | Apple ID | the Apple Account picked from those saved, or typed, and its saved token before any password ([below](#saved-apple-accounts)); then rust-core's `apple_session.rs`, compiled unchanged: saved token first, then GrandSlam + 2FA, Mac-ADI anisette servers in SideInstaller's Auto order; then the team, picked when Apple lists more than one ([below](#more-than-one-team)) |
-| 5 | Sign | the `SideInstaller.ipa` from step 1, signed with isideload's `sign_app` (device registered, app group, no Increased Memory Limit), as Side by Side does |
+| 5 | Sign | the selected IPA from step 1, signed with isideload's `sign_app` (device registered, app group, no Increased Memory Limit), as Side by Side does |
 | 6 | Install | AFC upload to `/PublicStaging`, every file checked, `installation_proxy` with `PackageType: Developer` |
-| 7 | Hand over | house_arrest writes the pairing file to `Library/Application Support/rp_pairing_file.plist` and marks it imported (`importedPairingFileName`), as Side by Side hands one to SideInstaller |
+| 7 | Finish | for AelSign/legacy SideInstaller, house_arrest hands it the pairing file and marks it imported; for any other IPA, pairing handoff is skipped |
 
 `siboot check` runs step 1 only, and `siboot connect` steps 1–3.
 `siboot developer-mode` runs steps 1–3 and then asks for Developer Mode
@@ -359,7 +375,7 @@ siboot developer-mode
 ```
 
 Before siboot is installed, the same is
-`wget -qO- https://raw.githubusercontent.com/FrizzleM/siboot/main/minis/install.sh | sh -s developer-mode`.
+`wget -qO- https://raw.githubusercontent.com/Youaremurderinmymind/siboot/main/minis/install.sh | sh -s developer-mode`.
 
 It works as SideInstaller's Settings › Developer Mode does. siboot opens the
 install's tunnel (steps 1–3, without the internet checks), and lockdownd says
@@ -410,7 +426,7 @@ script's binary:
 
 ```sh
 for f in install.sh bin/siboot-aarch64; do
-  curl -fsS "https://purge.jsdelivr.net/gh/FrizzleM/siboot@main/minis/$f"
+  curl -fsS "https://purge.jsdelivr.net/gh/Youaremurderinmymind/siboot@main/minis/$f"
 done
 ```
 

@@ -1,16 +1,16 @@
 #!/bin/sh
 # Installs siboot into Open Minis and runs it, which pairs this iPhone with
 # itself (Open Minis 1.16 and later; siboot stops in an older one), signs
-# SideInstaller with your Apple Account and installs it.
+# the IPA you chose with your Apple Account and installs it.
 #
 # In Minis's terminal (Minis › Settings › Terminal):
 #
-#   wget -qO- https://raw.githubusercontent.com/FrizzleM/siboot/main/minis/install.sh | sh
+#   wget -qO- https://raw.githubusercontent.com/Youaremurderinmymind/siboot/main/minis/install.sh | sh
 #
 # Where raw.githubusercontent.com is blocked (mainland China, Iran), the same
 # script through jsDelivr:
 #
-#   wget -qO- https://fastly.jsdelivr.net/gh/FrizzleM/siboot@main/minis/install.sh | sh
+#   wget -qO- https://fastly.jsdelivr.net/gh/Youaremurderinmymind/siboot@main/minis/install.sh | sh
 #
 # Afterwards `siboot` runs it again, without downloading.
 set -eu
@@ -19,16 +19,16 @@ set -eu
 # file through jsDelivr's CDNs, which can get through where GitHub's raw files
 # don't. Whichever answers, the copy has to match SHA256, so a mirror can't
 # change what runs. SIBOOT_BASE replaces the list (one URL, or several).
-SOURCES="https://raw.githubusercontent.com/FrizzleM/siboot/main/minis
-https://fastly.jsdelivr.net/gh/FrizzleM/siboot@main/minis
-https://gcore.jsdelivr.net/gh/FrizzleM/siboot@main/minis
-https://cdn.jsdelivr.net/gh/FrizzleM/siboot@main/minis"
+SOURCES="https://raw.githubusercontent.com/Youaremurderinmymind/siboot/main/minis
+https://fastly.jsdelivr.net/gh/Youaremurderinmymind/siboot@main/minis
+https://gcore.jsdelivr.net/gh/Youaremurderinmymind/siboot@main/minis
+https://cdn.jsdelivr.net/gh/Youaremurderinmymind/siboot@main/minis"
 SOURCES="${SIBOOT_BASE:-$SOURCES}"
 # Of bin/siboot-aarch64, updated with it: a download that doesn't match (an
 # error page, a cut-off transfer, a stale mirror) is never run. SIZE only
 # draws the progress bar.
-SHA256="05d0a2ef07f99caca762efc6a6e4a7a8b1a691186dd1158759bf18755093c760"
-SIZE=12209056
+SHA256="a565350839bad34ccf4962c92c33824436adcfe0b311913f9eb32a98441e7ec9"
+SIZE=12143448
 
 DIR="$HOME/.siboot/bin"
 BIN="$DIR/siboot"

@@ -9,17 +9,18 @@
 //!
 //! The page reads the run as server-sent events (`events`): every event since
 //! the start, then each new one as it happens, so a page opened again draws
-//! the same screen. It answers siboot's questions with a POST (`answer`), and
-//! can stop the run (`stop`). Nothing else is served.
+//! the same screen. It answers siboot's questions with a POST (`answer`),
+//! accepts selected IPA files in bounded chunks (`upload`), and can stop the
+//! run (`stop`). Nothing else is served.
 //!
 //! The key keeps the rest of the iPhone out. Any app on it, and any website
 //! open in a browser on it, can reach a loopback port, but none can guess the
 //! key, and every path starts with it. The listener is on 127.0.0.1 only, so
 //! nothing on the Wi-Fi reaches it at all. On top of that, the Host header must
-//! name this loopback and port (no DNS rebinding), a POST must be JSON (a form
-//! on another site can't send that without a preflight, which is refused) and
-//! come from this page's own origin when it names one, and the page can't be
-//! framed, sends no referrer and loads nothing from anywhere else.
+//! name this loopback and port (no DNS rebinding), POSTs must come from this
+//! page's own origin when they name one (and cross-origin preflights are
+//! refused), and the page can't be framed, sends no referrer and loads nothing
+//! from anywhere else.
 //!
 //! What's typed in the page goes to the question that asked for it and no
 //! further: an answer is never sent back to the page, and the run's log only
@@ -29,6 +30,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -42,9 +44,11 @@ const PAGE: &str = include_str!("web.html");
 const CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
                    connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; \
                    frame-ancestors 'none'";
-/// A request's line and headers are never longer, nor a POST's body.
+/// The request line and headers, then each upload chunk, are bounded.
 const MAX_HEAD: usize = 8 * 1024;
-const MAX_BODY: usize = 4 * 1024;
+/// Uploads are sequential 512 KiB chunks; only one chunk is held in memory.
+const MAX_BODY: usize = 512 * 1024;
+const MAX_IPA_SIZE: u64 = 1024 * 1024 * 1024;
 /// Connections at once. The page keeps one open and makes one for each
 /// answer; a reload or two more is plenty.
 const MAX_CONNECTIONS: usize = 16;
@@ -92,6 +96,11 @@ pub fn progress_end() {
     if let Some(server) = page() {
         server.progress_end();
     }
+}
+
+/// Ask the page to choose an IPA from Files, if this run has a web page.
+pub fn choose_ipa() -> Option<UploadedIpa> {
+    page()?.choose_ipa()
 }
 
 /// What the page's Stop does, on the thread that took the request.
@@ -178,14 +187,47 @@ struct State {
     events: Vec<String>,
     /// The question waiting for the page, and its answer once given.
     asking: Option<u64>,
+    asking_ipa: bool,
     answer: Option<Value>,
     questions: u64,
+    /// The upload waiting for the page's current IPA question.
+    upload: Option<Upload>,
+    /// The completed temporary IPA, retained so Stop can remove it too.
+    staged_ipa: Option<PathBuf>,
     /// The event streams open now, and how many events each has sent.
     streams: HashMap<u64, usize>,
     stream_ids: u64,
     /// The progress last sent, so a bar sends one event a percent.
     progress: Option<(String, u64)>,
     ended: bool,
+}
+
+struct Upload {
+    question: u64,
+    token: String,
+    size: u64,
+    received: u64,
+    path: PathBuf,
+    file: std::fs::File,
+}
+
+enum ChunkOutcome {
+    Conflict,
+    Failed,
+    Invalid,
+    More,
+    Complete,
+}
+
+/// The IPA uploaded from Files; removed when the run finishes.
+pub struct UploadedIpa {
+    pub path: PathBuf,
+}
+
+impl Drop for UploadedIpa {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// A six-digit code, or what the page asked for instead.
@@ -254,6 +296,42 @@ impl Server {
         self.shared.push(&mut state, json!({"t": "progress_end"}));
     }
 
+    /// Ask the page to choose a local IPA to install.
+    pub fn choose_ipa(&self) -> Option<UploadedIpa> {
+        let answer = self.ask(json!({
+            "kind": "ipa",
+            "question": "Choose an IPA you trust. It will be signed with your Apple Account and installed on this iPhone.",
+        }));
+        if let Some(id) = answer["id"].as_u64() {
+            self.discard_upload(id);
+        }
+        if cancelled(&answer) {
+            return None;
+        }
+        let path = answer["path"].as_str()?;
+        Some(UploadedIpa {
+            path: PathBuf::from(path),
+        })
+    }
+
+    fn discard_upload(&self, question: u64) {
+        let upload = {
+            let mut state = self.shared.lock();
+            if state
+                .upload
+                .as_ref()
+                .is_some_and(|upload| upload.question == question)
+            {
+                state.upload.take()
+            } else {
+                None
+            }
+        };
+        if let Some(upload) = upload {
+            let _ = std::fs::remove_file(upload.path);
+        }
+    }
+
     /// Ask the page, and wait for its answer, however long it takes.
     fn ask(&self, mut question: Value) -> Value {
         let shared = &self.shared;
@@ -263,6 +341,7 @@ impl Server {
         question["t"] = json!("ask");
         question["id"] = json!(id);
         state.asking = Some(id);
+        state.asking_ipa = question["kind"].as_str() == Some("ipa");
         state.answer = None;
         shared.push(&mut state, question);
         let answer = loop {
@@ -275,6 +354,7 @@ impl Server {
                 .unwrap_or_else(|e| e.into_inner());
         };
         state.asking = None;
+        state.asking_ipa = false;
         shared.push(&mut state, json!({"t": "answered", "id": id}));
         answer
     }
@@ -382,6 +462,12 @@ impl Server {
     pub fn close(&self) {
         let shared = &self.shared;
         let mut state = shared.lock();
+        if let Some(upload) = state.upload.take() {
+            let _ = std::fs::remove_file(upload.path);
+        }
+        if let Some(path) = state.staged_ipa.take() {
+            let _ = std::fs::remove_file(path);
+        }
         if !state.ended {
             state.ended = true;
             shared.push(&mut state, json!({"t": "end"}));
@@ -606,8 +692,9 @@ fn handle(shared: &Shared, stream: TcpStream) -> io::Result<()> {
         ),
         ("GET", "/events") => events(shared, &stream, &request),
         ("POST", "/answer") => answer(shared, &stream, &request),
+        ("POST", "/upload") => upload(shared, &stream, &request),
         ("POST", "/stop") => stop(shared, &stream, &request),
-        (_, "" | "/" | "/events" | "/answer" | "/stop") => refuse(&stream, 405),
+        (_, "" | "/" | "/events" | "/answer" | "/upload" | "/stop") => refuse(&stream, 405),
         _ => refuse(&stream, 404),
     }
 }
@@ -631,6 +718,160 @@ fn posted_json(shared: &Shared, request: &Request) -> Result<Value, u16> {
     serde_json::from_slice(&request.body).map_err(|_| 400)
 }
 
+fn upload(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<()> {
+    if let Some(origin) = request.header("origin") {
+        if !shared.is_own_origin(origin) {
+            return refuse(stream, 403);
+        }
+    }
+    let binary = request.header("content-type").is_some_and(|kind| {
+        kind.split(';')
+            .next()
+            .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("application/octet-stream"))
+    });
+    if !binary {
+        return refuse(stream, 415);
+    }
+    let Some(question) = request
+        .header("x-ipa-question")
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return refuse(stream, 400);
+    };
+    let Some(size) = request
+        .header("x-ipa-size")
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return refuse(stream, 400);
+    };
+    let Some(offset) = request
+        .header("x-ipa-offset")
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return refuse(stream, 400);
+    };
+    let Some(token) = request.header("x-ipa-token") else {
+        return refuse(stream, 400);
+    };
+    if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return refuse(stream, 400);
+    }
+    if size == 0 || size > MAX_IPA_SIZE {
+        return refuse(stream, 413);
+    }
+    if request.body.is_empty()
+        || request.body.len() > MAX_BODY
+        || offset
+            .checked_add(request.body.len() as u64)
+            .map_or(true, |end| end > size)
+    {
+        return refuse(stream, 400);
+    }
+
+    let (status, remove) = {
+        let mut state = shared.lock();
+        if state.asking != Some(question) || !state.asking_ipa || state.answer.is_some() {
+            return refuse(stream, 409);
+        }
+        // A fresh file selection starts at zero and replaces a failed/partial
+        // attempt from this same question. Tokens keep overlapping uploads out.
+        if state.upload.as_ref().is_some_and(|upload| {
+            upload.question == question && offset == 0 && upload.token != token
+        }) {
+            if let Some(old) = state.upload.take() {
+                let _ = std::fs::remove_file(old.path);
+            }
+        }
+        if state.upload.is_none() {
+            if offset != 0 {
+                return refuse(stream, 409);
+            }
+            let upload = match new_upload(question, token.to_string(), size) {
+                Ok(upload) => upload,
+                Err(_) => return refuse(stream, 500),
+            };
+            state.upload = Some(upload);
+        }
+        let outcome = {
+            let upload = state.upload.as_mut().unwrap();
+            if upload.question != question
+                || upload.token != token
+                || upload.size != size
+                || upload.received != offset
+            {
+                ChunkOutcome::Conflict
+            } else if upload.file.write_all(&request.body).is_err() {
+                ChunkOutcome::Failed
+            } else {
+                upload.received += request.body.len() as u64;
+                if upload.received < upload.size {
+                    ChunkOutcome::More
+                } else if upload.file.flush().is_err() || upload.file.sync_all().is_err() {
+                    ChunkOutcome::Failed
+                } else {
+                    let mut magic = [0u8; 4];
+                    let valid = std::fs::File::open(&upload.path)
+                        .and_then(|mut file| file.read_exact(&mut magic))
+                        .is_ok()
+                        && &magic == b"PK\x03\x04";
+                    if valid {
+                        ChunkOutcome::Complete
+                    } else {
+                        ChunkOutcome::Invalid
+                    }
+                }
+            }
+        };
+        match outcome {
+            ChunkOutcome::Conflict => (409, None),
+            ChunkOutcome::More => (204, None),
+            ChunkOutcome::Failed => {
+                let failed = state.upload.take().unwrap();
+                (500, Some(failed.path))
+            }
+            ChunkOutcome::Invalid => {
+                let failed = state.upload.take().unwrap();
+                (422, Some(failed.path))
+            }
+            ChunkOutcome::Complete => {
+                let complete = state.upload.take().unwrap();
+                let path = complete.path.clone();
+                drop(complete);
+                state.staged_ipa = Some(path.clone());
+                state.answer = Some(json!({
+                    "id": question,
+                    "path": path.to_string_lossy().into_owned(),
+                }));
+                shared.changed.notify_all();
+                (204, None)
+            }
+        }
+    };
+    if let Some(path) = remove {
+        let _ = std::fs::remove_file(path);
+    }
+    respond(stream, status, &[], b"")
+}
+
+fn new_upload(question: u64, token: String, size: u64) -> io::Result<Upload> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let path = std::env::temp_dir().join(format!("siboot-upload-{}.ipa", random_key()?));
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .read(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)?;
+    Ok(Upload {
+        question,
+        token,
+        size,
+        received: 0,
+        path,
+        file,
+    })
+}
 fn answer(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<()> {
     let given = match posted_json(shared, request) {
         Ok(given) => given,
@@ -658,6 +899,16 @@ fn stop(shared: &Shared, stream: &TcpStream, request: &Request) -> io::Result<()
         return refuse(stream, status);
     }
     respond(stream, 204, &[], b"")?;
+    let (upload, staged) = {
+        let mut state = shared.lock();
+        (state.upload.take(), state.staged_ipa.take())
+    };
+    if let Some(upload) = upload {
+        let _ = std::fs::remove_file(upload.path);
+    }
+    if let Some(path) = staged {
+        let _ = std::fs::remove_file(path);
+    }
     if let Some(stop) = shared
         .on_stop
         .lock()
@@ -788,7 +1039,9 @@ fn reason(status: u16) -> &'static str {
         409 => "Conflict",
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
+        422 => "Unprocessable Content",
         431 => "Request Header Fields Too Large",
+        500 => "Internal Server Error",
         _ => "Error",
     }
 }
@@ -921,7 +1174,12 @@ mod tests {
         assert_eq!(get(&server, &wrong).0, 404);
         let (status, headers, body) = get(&server, &format!("{}/", base(&server)));
         assert_eq!(status, 200);
-        assert!(body.contains("<title>siboot</title>"));
+        assert!(body.contains("<title>AelSign</title>"));
+        assert!(body.contains("class=\"badge\">AelSign</span>"));
+        assert!(body.contains("Based on siboot by FrizzleM"));
+        assert!(body.contains("Choose an IPA from Files"));
+        assert!(body.contains("Choose apps you trust"));
+        assert!(body.contains("uploadIpa"));
         assert_eq!(header(&headers, "content-security-policy"), Some(CSP));
         assert_eq!(header(&headers, "referrer-policy"), Some("no-referrer"));
         assert_eq!(header(&headers, "cache-control"), Some("no-store"));
@@ -989,11 +1247,13 @@ mod tests {
             "a".repeat(MAX_HEAD)
         );
         assert_eq!(exchange(&server, &raw).0, 431);
-        let body = "x".repeat(MAX_BODY + 1);
-        assert_eq!(
-            post(&server, &format!("{}/answer", base(&server)), &body, ""),
-            413
+        let raw = format!(
+            "POST {}/answer HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            base(&server),
+            host(&server),
+            MAX_BODY + 1,
         );
+        assert_eq!(exchange(&server, &raw).0, 413);
     }
 
     #[test]
@@ -1052,6 +1312,101 @@ mod tests {
             &body.to_string(),
             "",
         )
+    }
+
+    fn upload_chunk(
+        server: &Server,
+        id: u64,
+        token: &str,
+        size: usize,
+        offset: usize,
+        bytes: &[u8],
+    ) -> u16 {
+        let mut stream = TcpStream::connect(("127.0.0.1", server.shared.port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let raw = format!(
+            concat!(
+                "POST {}/upload HTTP/1.1\r\n",
+                "Host: {}\r\n",
+                "Content-Type: application/octet-stream\r\n",
+                "Content-Length: {}\r\n",
+                "X-IPA-Question: {}\r\n",
+                "X-IPA-Token: {}\r\n",
+                "X-IPA-Size: {}\r\n",
+                "X-IPA-Offset: {}\r\n",
+                "Origin: http://{}\r\n\r\n",
+            ),
+            base(server),
+            host(server),
+            bytes.len(),
+            id,
+            token,
+            size,
+            offset,
+            host(server),
+        );
+        stream.write_all(raw.as_bytes()).unwrap();
+        stream.write_all(bytes).unwrap();
+        let mut response = Vec::new();
+        let _ = stream.read_to_end(&mut response);
+        String::from_utf8_lossy(&response)
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|status| status.parse().ok())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn ipa_upload_is_ordered_validated_and_cleaned_up() {
+        let server = leaked();
+        let mut reader = subscribe(server, None);
+        let selection = asked(server, |server| server.choose_ipa());
+        let question = until(&mut reader, "ask");
+        assert_eq!(question["kind"], "ipa");
+        let id = question["id"].as_u64().unwrap();
+        let token = "0123456789abcdef0123456789abcdef";
+        let bytes = b"PK\x03\x04IPA";
+        assert_eq!(upload_chunk(server, id, token, bytes.len(), 1, b"x"), 409);
+        assert_eq!(upload_chunk(server, id, token, bytes.len(), 0, b"PK"), 204);
+        assert_eq!(upload_chunk(server, id, token, bytes.len(), 3, b"x"), 409);
+        assert_eq!(
+            upload_chunk(server, id, token, bytes.len(), 2, &bytes[2..]),
+            204
+        );
+        assert_eq!(until(&mut reader, "answered")["id"], id);
+        let Some(upload) = selection.join().unwrap() else {
+            panic!("expected the uploaded IPA");
+        };
+        assert_eq!(std::fs::read(&upload.path).unwrap(), bytes);
+        let path = upload.path.clone();
+        drop(upload);
+        assert!(!path.exists(), "staged IPA is removed after the run");
+    }
+
+    #[test]
+    fn non_zip_upload_can_be_reselected() {
+        let server = leaked();
+        let mut reader = subscribe(server, None);
+        let selection = asked(server, |server| server.choose_ipa());
+        let question = until(&mut reader, "ask");
+        let id = question["id"].as_u64().unwrap();
+        let bad_token = "abcdef0123456789abcdef0123456789";
+        assert_eq!(upload_chunk(server, id, bad_token, 4, 0, b"nope"), 422);
+        let good_token = "0123456789abcdef0123456789abcdef";
+        let bytes = b"PK\x03\x04IPA";
+        assert_eq!(
+            upload_chunk(server, id, good_token, bytes.len(), 0, bytes),
+            204
+        );
+        assert_eq!(until(&mut reader, "answered")["id"], id);
+        let Some(upload) = selection.join().unwrap() else {
+            panic!("expected the reselected IPA");
+        };
+        assert_eq!(std::fs::read(&upload.path).unwrap(), bytes);
+        assert!(server.shared.lock().upload.is_none());
     }
 
     #[test]
@@ -1229,18 +1584,32 @@ mod tests {
         assert_eq!(question["steps"][1], "Tap Pair with siboot.");
         assert_eq!(question["notes"][0], "A player opens.");
         assert_eq!(question["button"], "Start pairing");
-        reply(server, question["id"].as_u64().unwrap(), json!({"go": true}));
+        reply(
+            server,
+            question["id"].as_u64().unwrap(),
+            json!({"go": true}),
+        );
         assert!(started.join().unwrap());
 
-        let cancelled = asked(server, |s| s.ready("Pair", &["Open Settings."], &[], "Start"));
+        let cancelled = asked(server, |s| {
+            s.ready("Pair", &["Open Settings."], &[], "Start")
+        });
         let question = until(&mut reader, "ask");
-        reply(server, question["id"].as_u64().unwrap(), json!({"cancel": true}));
+        reply(
+            server,
+            question["id"].as_u64().unwrap(),
+            json!({"cancel": true}),
+        );
         assert!(!cancelled.join().unwrap());
     }
 
     #[test]
     fn stop_runs_the_hook() {
         let server = served();
+        let staged =
+            std::env::temp_dir().join(format!("siboot-test-stop-{}.ipa", random_key().unwrap()));
+        std::fs::File::create(&staged).unwrap();
+        server.shared.lock().staged_ipa = Some(staged.clone());
         let stopped = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stopped);
         *server.shared.on_stop.lock().unwrap() =
@@ -1250,6 +1619,7 @@ mod tests {
             204
         );
         assert!(stopped.load(Ordering::SeqCst));
+        assert!(!staged.exists(), "Stop removes the completed staged IPA");
     }
 
     #[test]

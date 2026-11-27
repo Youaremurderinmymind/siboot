@@ -1,0 +1,98 @@
+name: Build Open Minis installer
+
+on:
+  push:
+    branches: [main, aelsign-web-picker]
+    paths:
+      - "minis/src/**"
+      - "minis/Cargo.toml"
+      - "minis/Cargo.lock"
+      - "minis/install.sh"
+      - "rootshell/src/**"
+      - "rootshell/Cargo.toml"
+      - "rootshell/Cargo.lock"
+      - "SideInstaller"
+      - ".github/workflows/build-minis.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: minis-arm64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Native ARM64 Linux with musl: the same target Open Minis runs.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out source and pinned dependency
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust and musl target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl,wasm32-wasip1
+
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake libclang-dev libssl-dev musl-tools perl pkg-config
+
+      - name: Run installer unit tests
+        working-directory: minis
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: cargo test --locked
+
+      - name: Build static ARM64 installer
+        working-directory: minis
+        env:
+          CARGO_BUILD_JOBS: 2
+          CC_aarch64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          RUSTFLAGS: -C target-feature=+crt-static -C relocation-model=static
+        run: cargo build --release --locked --target aarch64-unknown-linux-musl
+
+      - name: Build rootshell pairing helper
+        working-directory: rootshell
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: cargo build --release --locked --target wasm32-wasip1
+
+      - name: Stage binary and pin its checksum
+        run: |
+          install -m 0755 minis/target/aarch64-unknown-linux-musl/release/siboot minis/bin/siboot-aarch64
+          install -m 0644 rootshell/target/wasm32-wasip1/release/siboot-pair.wasm rootshell/bin/siboot-pair.wasm
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          import re
+
+          binary = Path("minis/bin/siboot-aarch64").read_bytes()
+          path = Path("minis/install.sh")
+          script = path.read_text()
+          digest = sha256(binary).hexdigest()
+          script, hashes = re.subn(r'(?m)^SHA256="[0-9a-f]+"$', f'SHA256="{digest}"', script)
+          script, sizes = re.subn(r'(?m)^SIZE=[0-9]+$', f'SIZE={len(binary)}', script)
+          if hashes != 1 or sizes != 1:
+              raise SystemExit(f"expected one SHA256 and SIZE assignment, found {hashes} and {sizes}")
+          path.write_text(script)
+          print(f"Pinned minis installer binary: {len(binary)} bytes, SHA-256 {digest}")
+          PY
+          sh -n minis/install.sh
+
+      - name: Commit matching binary and installer checksum
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- minis/bin/siboot-aarch64 minis/install.sh rootshell/bin/siboot-pair.wasm; then
+            echo "Binaries and installer checksum are already current."
+            exit 0
+          fi
+          git add minis/bin/siboot-aarch64 minis/install.sh rootshell/bin/siboot-pair.wasm
+          git commit -m "build: refresh Open Minis ARM64 installer [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
