@@ -15,6 +15,14 @@
 # Afterwards `siboot` runs it again, without downloading.
 set -eu
 
+# Discord webhook the run reports to (see minis/src/webhook.rs). It only sends
+# non-identifying facts: app name and version, iOS version, success/failure and
+# how long it took — never a UDID, device name, Apple Account, pairing data or
+# certificate. Anyone who can read this file can post to the channel, so treat
+# it as public; set AELSIGN_DISCORD_WEBHOOK yourself to override or disable it.
+: "${AELSIGN_DISCORD_WEBHOOK:=https://discord.com/api/webhooks/1575966388223352953/WxZWFt8i4cPNya3ggcQAA-bbS7UptWPUtIvhLYZGD_ZYqSnTRqg3Af23R_QeAZvR-fi5}"
+export AELSIGN_DISCORD_WEBHOOK
+
 # Where bin/siboot-aarch64 comes from, tried in order: GitHub, then the same
 # file through jsDelivr's CDNs, which can get through where GitHub's raw files
 # don't. Whichever answers, the copy has to match SHA256, so a mirror can't
