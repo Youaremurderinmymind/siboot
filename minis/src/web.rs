@@ -1352,7 +1352,7 @@ mod tests {
         assert!(body.contains("Based on siboot by FrizzleM"));
         assert!(body.contains("Choose an IPA from Files"));
         assert!(body.contains("Choose apps you trust"));
-        assert!(body.contains("uploadIpa"));
+        assert!(body.contains("uploadFile"));
         assert_eq!(header(&headers, "content-security-policy"), Some(CSP));
         assert_eq!(header(&headers, "referrer-policy"), Some("no-referrer"));
         assert_eq!(header(&headers, "cache-control"), Some("no-store"));
