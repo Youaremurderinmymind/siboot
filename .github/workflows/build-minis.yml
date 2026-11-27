@@ -2,7 +2,7 @@ name: Build Open Minis installer
 
 on:
   push:
-    branches: [main, aelsign-web-picker]
+    branches: [main, aelsign-web-picker, aelsign-cert-options]
     paths:
       - "minis/src/**"
       - "minis/Cargo.toml"
