@@ -4,8 +4,14 @@ on:
   push:
     branches: [main, aelsign-web-picker]
     paths:
-      - "minis/**"
-      - "rootshell/**"
+      - "minis/src/**"
+      - "minis/Cargo.toml"
+      - "minis/Cargo.lock"
+      - "minis/install.sh"
+      - "rootshell/src/**"
+      - "rootshell/Cargo.toml"
+      - "rootshell/Cargo.lock"
+      - "SideInstaller"
       - ".github/workflows/build-minis.yml"
   workflow_dispatch:
 

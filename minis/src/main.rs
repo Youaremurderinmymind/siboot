@@ -222,9 +222,10 @@ Open Minis, with your own Apple Account.
 {usage}
   siboot [command] [options]
 
-  With no command, every step runs: check,
-  sign in, sign the selected IPA, and install it.
-  AelSign receives the pairing file; other IPAs do not.
+  With no command, every step runs:
+  check, pair, connect, sign in, sign the
+  selected IPA, and install it. AelSign gets the
+  pairing file; other apps do not.
 
 {commands}
   {check}

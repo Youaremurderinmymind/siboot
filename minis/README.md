@@ -25,7 +25,9 @@ scroll to the bottom, tap **Pair with siboot**, and enter your passcode, then
 the 6-digit code siboot shows (it also comes as a notification). A player opens
 over Minis meanwhile: leave it open, it keeps Minis running while you're in
 Settings. Go back to Minis once Settings says it's paired. After that siboot
-uses the pairing file it saved and doesn't ask. Then your Apple Account email,
+uses the pairing file it saved and doesn't ask. Only use an Apple Account you
+own or have permission to use; keep its password and verification codes private
+and never send them in chat. Then your Apple Account email,
 password and verification code, and, if the account is on more than one
 developer team (a paid membership and the free team every account has, say),
 which team signs ([below](#more-than-one-team)). The next time, siboot offers
@@ -58,14 +60,23 @@ where GitHub doesn't answer, checks it against the SHA-256 the script carries,
 keeps it at `~/.siboot/bin/siboot` (and `/usr/local/bin/siboot`), and runs it.
 After that, `siboot` on its own runs it again without downloading.
 
-This fork's **Build Open Minis installer** GitHub Action runs on pushes to
+This fork's **Build Open Minis installer** GitHub Action runs on code changes to
 `main` and `aelsign-web-picker` (or manually), builds the static ARM64 binary
-and rootshell pairing WASM, and commits both together with the matching SHA-256
-and size. The installer starts with an all-zero checksum and refuses the old
-binary until that build finishes, so wait for the successful Action and its
-generated commit before running the install command. In the fork's Settings ›
-Actions, enable Actions and set workflow permissions to **Read and write
-permissions** so the bot can commit the rebuilt artifacts.
+and rootshell pairing WASM, and commits both together with their matching
+checksum/size metadata. The installer begins with an all-zero checksum and
+refuses the old binary until a build succeeds. In the fork's Settings › Actions,
+enable Actions and set workflow permissions to **Read and write permissions**
+so the bot can commit generated artifacts.
+
+After the review-branch Action succeeds, test that branch in Open Minis with:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/Youaremurderinmymind/siboot/aelsign-web-picker/minis/install.sh | SIBOOT_BASE='https://raw.githubusercontent.com/Youaremurderinmymind/siboot/aelsign-web-picker/minis' sh
+```
+
+After the PR is reviewed and merged, use the normal `main` command at the top.
+The CI tests the server and uploader, but cannot test the iOS Files picker in
+Open Minis; verify that the picker opens on-device before relying on it.
 
 ## Where GitHub is blocked
 
