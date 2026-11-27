@@ -31,7 +31,17 @@
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none !important}
 html{color-scheme:dark; background:var(--page); -webkit-text-size-adjust:100%}
-body{margin:0; background:var(--page); color:var(--text); font:400 16px/1.45 var(--sans); -webkit-font-smoothing:antialiased}
+body{margin:0; background:var(--page); color:var(--text); font:400 16px/1.45 var(--sans); -webkit-font-smoothing:antialiased; overflow-x:hidden}
+/* Animated background: a slow moving gradient plus floating particles. */
+.bg{position:fixed; inset:0; z-index:-1; overflow:hidden; pointer-events:none}
+.bg .wash{position:absolute; inset:-40%; background:
+  radial-gradient(45% 35% at 20% 20%, rgba(47,128,255,.22), transparent 60%),
+  radial-gradient(45% 35% at 80% 25%, rgba(76,195,138,.16), transparent 60%),
+  radial-gradient(50% 40% at 50% 85%, rgba(229,161,64,.14), transparent 60%);
+  animation:drift 22s ease-in-out infinite alternate}
+@keyframes drift{from{transform:translate3d(-2%,-1%,0) rotate(0)}to{transform:translate3d(2%,2%,0) rotate(2deg)}}
+.bg .orb{position:absolute; border-radius:50%; filter:blur(1px); opacity:.5; animation:float linear infinite}
+@keyframes float{from{transform:translateY(110vh) scale(.8)}to{transform:translateY(-12vh) scale(1.15)}}
 h1,h2,p,ol,ul{margin:0}
 ol,ul{padding:0; list-style:none}
 button,input{font:inherit; color:inherit}
@@ -50,6 +60,14 @@ main{max-width:34rem; margin:0 auto; padding:max(20px,env(safe-area-inset-top)) 
 .keep::before{content:"▲"; flex:none; font-size:11px; line-height:22px; color:var(--warning)}
 .banner{margin-top:16px; padding:12px 14px; border-radius:var(--r-control); background:var(--control); font-size:15px; color:var(--text-2)}
 .banner[data-tone=warn]{background:rgba(229,161,64,.08); box-shadow:inset 0 0 0 1px rgba(229,161,64,.35); color:var(--text)}
+
+/* ---------- the device card ---------- */
+
+.device{margin-top:20px; padding:16px; border:1px solid var(--hairline); border-radius:var(--r-card); background:var(--card); display:flex; align-items:center; gap:16px}
+.device svg{flex:none}
+.device .d-name{font-size:17px; font-weight:600; overflow-wrap:anywhere}
+.device .d-meta{font:400 13px/1.5 var(--mono); color:var(--text-2); overflow-wrap:anywhere}
+.device .d-meta span{color:var(--muted)}
 
 /* ---------- the steps ---------- */
 
@@ -155,6 +173,8 @@ body:not(.details) .step[data-state=done] .item.ok{display:none}
 .cause p{margin-top:6px; font:400 13px/1.5 var(--mono); overflow-wrap:anywhere}
 
 footer{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:32px; font-size:13px; color:var(--muted)}
+.credit{display:inline-flex; align-items:center; gap:6px}
+.credit svg{color:#5865f2; flex:none}
 .details-toggle{display:flex; align-items:center; gap:8px; cursor:pointer}
 .details-toggle input{width:16px; height:16px; margin:0; accent-color:var(--accent)}
 
@@ -164,6 +184,9 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
 </style>
 </head>
 <body>
+<div class="bg" id="bg" aria-hidden="true">
+  <div class="wash"></div>
+</div>
 <main>
   <header class="top">
     <div class="brand"><span class="badge">AelSign</span><span class="version" id="version"></span></div>
@@ -171,6 +194,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
   </header>
   <h1 class="tagline" id="tagline">Connecting to siboot…</h1>
   <p class="keep" id="keep" hidden></p>
+  <section class="device" id="device" hidden></section>
   <p class="banner" id="banner" role="status" hidden></p>
   <ol class="steps" id="steps" aria-live="polite"></ol>
   <section class="outcome" id="outcome" hidden></section>
@@ -178,7 +202,10 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
   <form class="ask" id="ask" hidden novalidate></form>
   <footer>
     <label class="details-toggle"><input type="checkbox" id="details">Show details</label>
-    <span>Based on siboot by FrizzleM</span>
+    <span class="credit">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.6a16.9 16.9 0 0 0-6.2 0L8.6 3a19.8 19.8 0 0 0-4.9 1.5C.7 9 .2 13.4.6 17.8A20 20 0 0 0 6.7 21l1-1.6a12.8 12.8 0 0 1-2-1l.5-.4a14.2 14.2 0 0 0 11.7 0l.5.4a12.8 12.8 0 0 1-2 1l1 1.6a20 20 0 0 0 6.1-3.2c.5-5.1-.9-9.5-3.2-13.4ZM8.7 15c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Z"/></svg>
+      unknownuserael
+    </span>
   </footer>
 </main>
 <script>
@@ -194,7 +221,8 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
   };
 
   const stepsEl = $("steps"), askEl = $("ask"), outcomeEl = $("outcome"),
-        afterEl = $("after"), bannerEl = $("banner"), stopEl = $("stop");
+        afterEl = $("after"), bannerEl = $("banner"), stopEl = $("stop"),
+        deviceEl = $("device"), bgEl = $("bg");
 
   let steps = [];        // one per step of the plan
   let active = -1;       // index of the running step
@@ -223,6 +251,65 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     lastHeard = Date.now();
     heard = true;
   }
+
+  // The device card: a simple outline drawn by model, plus name, iOS and UDID.
+  function deviceIcon(productType) {
+    const isIpad = /ipad/i.test(productType || "");
+    const w = isIpad ? 74 : 44, h = isIpad ? 96 : 88;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", isIpad ? "iPad" : "iPhone");
+    const frame = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    frame.setAttribute("x", 2); frame.setAttribute("y", 2);
+    frame.setAttribute("width", w - 4); frame.setAttribute("height", h - 4);
+    frame.setAttribute("rx", 10);
+    frame.setAttribute("fill", "none");
+    frame.setAttribute("stroke", "#a4a8b0");
+    frame.setAttribute("stroke-width", 2.5);
+    svg.appendChild(frame);
+    const screen = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    screen.setAttribute("x", 6); screen.setAttribute("y", 6);
+    screen.setAttribute("width", w - 12); screen.setAttribute("height", h - 12);
+    screen.setAttribute("rx", 7);
+    screen.setAttribute("fill", "#2f80ff");
+    screen.setAttribute("opacity", "0.14");
+    svg.appendChild(screen);
+    return svg;
+  }
+
+  function showDevice(e) {
+    deviceEl.textContent = "";
+    deviceEl.append(deviceIcon(e.product_type));
+    const info = make("div");
+    info.append(make("div", "d-name", e.name || "This device"));
+    const meta = make("div", "d-meta");
+    meta.append(document.createTextNode((e.product_type || "iPhone") + " · iOS " + (e.ios_version || "?")));
+    info.append(meta);
+    const udid = make("div", "d-meta");
+    udid.append(make("span", null, "UDID "), document.createTextNode(e.udid || "—"));
+    info.append(udid);
+    deviceEl.append(info);
+    deviceEl.hidden = false;
+  }
+
+  // Floating particles for the animated background.
+  function makeParticles() {
+    const colors = ["#2f80ff", "#4cc38a", "#e5a140"];
+    for (let i = 0; i < 14; i++) {
+      const orb = make("span", "orb");
+      const size = 4 + Math.random() * 10;
+      orb.style.width = orb.style.height = size + "px";
+      orb.style.left = (Math.random() * 100) + "%";
+      orb.style.background = colors[i % colors.length];
+      orb.style.animationDuration = (12 + Math.random() * 16) + "s";
+      orb.style.animationDelay = (-Math.random() * 20) + "s";
+      bgEl.append(orb);
+    }
+  }
+  makeParticles();
 
   // One line over the steps, and why it's there: "quiet" (no word from
   // siboot), "unsent" (an answer that didn't reach it) or "done". Each goes
@@ -708,6 +795,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         $("keep").hidden = !e.note;
         stopEl.hidden = ended;
         break;
+      case "device": showDevice(e); break;
       case "plan": plan(e.steps); break;
       case "step": begin(e.n, e.title, e.at); break;
       case "status": setStatus(e.text); break;

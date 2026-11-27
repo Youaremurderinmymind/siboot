@@ -592,6 +592,7 @@ async fn pipeline(args: &Args) -> Result<()> {
     ui::step(3, "Connecting to this iPhone through LocalDevVPN");
     let mut connection = tunnel::open(args.device, &pairing_path).await.map_err(note)?;
     let device = connection.describe().await.map_err(note)?;
+    ui::device(&device.name, &device.product_type, &device.ios_version, &device.udid);
     ui::ok(&format!(
         "{} — {} on iOS {}",
         device.name, device.product_type, device.ios_version
