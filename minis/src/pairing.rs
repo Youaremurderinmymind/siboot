@@ -88,7 +88,7 @@ const RETURN_WAIT: Duration = Duration::from_secs(10 * 60);
 pub const UPDATE_OR_ROOTSHELL: &str = "Update Open Minis from the App Store (1.16 and later pair \
      this iPhone themselves) and run siboot again. Or pair in rootshell (App Store): turn on its \
      Settings › Location Diary Mode › Session Only, then run in its local shell, one line at a \
-     time: `curl -fsSLO https://raw.githubusercontent.com/FrizzleM/siboot/main/rootshell/bin/siboot-pair.wasm`, \
+     time: `curl -fsSLO https://raw.githubusercontent.com/Youaremurderinmymind/siboot/main/rootshell/bin/siboot-pair.wasm`, \
      `ifconfig en0 > ifconfig.txt`, `./siboot-pair.wasm`. Once it has paired, leave it running \
      and run siboot here again: it asks for the transfer code rootshell shows.";
 

@@ -68,7 +68,9 @@ const STAGES: usize = 7;
 /// `developer-mode`: the install's first three steps, then Developer Mode.
 const DEVMODE_STAGES: usize = 4;
 /// The steps' names on the live screen, in order.
-const STEP_NAMES: [&str; STAGES] = ["Check", "Pairing", "Connect", "Apple ID", "Sign", "Install", "Handover"];
+const STEP_NAMES: [&str; STAGES] = [
+    "Check", "Pairing", "Connect", "Apple ID", "Sign", "Install", "Finish",
+];
 const DEVMODE_NAME: &str = "Dev Mode";
 
 /// LocalDevVPN's address for this iPhone: traffic to it comes back to the
@@ -121,6 +123,22 @@ impl Args {
 fn default_home() -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into());
     home.join(".siboot")
+}
+
+/// Only hand a pairing file to this installer family, never to an arbitrary
+/// IPA chosen by the user. The Apple team suffix is exactly ten uppercase
+/// letters or digits, as `isideload` signs these app identifiers.
+fn receives_pairing(bundle_id: &str) -> bool {
+    ["com.aelsign.app.", "com.frizzlem.sideinstaller."]
+        .iter()
+        .any(|prefix| {
+            bundle_id.strip_prefix(*prefix).is_some_and(|team| {
+                team.len() == 10
+                    && team
+                        .bytes()
+                        .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+            })
+        })
 }
 
 enum Parsed {
@@ -198,17 +216,15 @@ fn usage() {
     println!(
         "\
 {name} {VERSION}
-Installs SideInstaller onto this iPhone, from
+Installs a selected IPA onto this iPhone, from
 Open Minis, with your own Apple Account.
 
 {usage}
   siboot [command] [options]
 
   With no command, every step runs: check,
-  pair this iPhone with siboot (in Settings,
-  the first time), connect, sign in, sign
-  SideInstaller, install it, and hand it the
-  pairing.
+  sign in, sign the selected IPA, and install it.
+  AelSign receives the pairing file; other IPAs do not.
 
 {commands}
   {check}
@@ -235,8 +251,9 @@ Open Minis, with your own Apple Account.
       that shows only dots, and only when
       Apple wants it.
   {ipa}
-      Install this IPA instead of SideInstaller's
-      latest release.
+      Use this IPA instead of the latest release.
+      In the web page, choose from Files when
+      this option is omitted.
   {anisette}
       Sign in through this anisette server only.
   {turn_on}
@@ -339,6 +356,8 @@ fn main() -> ExitCode {
         VERSION,
         if args.command == Command::DeveloperMode {
             "Shows Developer Mode, or turns it on."
+        } else if page.is_some() {
+            "Signs and installs the selected IPA on this iPhone."
         } else {
             "Installs SideInstaller on this iPhone."
         },
@@ -484,6 +503,26 @@ async fn pipeline(args: &Args) -> Result<()> {
             ui::plan(&names, DEVMODE_STAGES);
         }
     }
+    // In the web workflow, pick a local IPA before step 1 starts. `--ipa`
+    // remains an explicit override, and terminal runs keep their old default.
+    let uploaded_ipa =
+        if args.command == Command::All && args.ipa.is_none() && web::page().is_some() {
+            match web::choose_ipa() {
+                Some(upload) => Some(upload),
+                None => return Err(Fail::by_user("Stopped before choosing an IPA.")),
+            }
+        } else {
+            None
+        };
+    let effective_args = match &uploaded_ipa {
+        Some(upload) => Args {
+            ipa: Some(upload.path.to_string_lossy().into_owned()),
+            ..args.clone()
+        },
+        None => args.clone(),
+    };
+    let args = &effective_args;
+
     // Before the request, a failure also says what siboot can't do without the
     // tunnel.
     let note = |f: Fail| if devmode { devmode::unreachable_note(f) } else { f };
@@ -546,7 +585,7 @@ async fn pipeline(args: &Args) -> Result<()> {
     let mut session = account::sign_in(args).await?;
     ui::done(&session.team);
 
-    ui::step(5, "Signing SideInstaller for this iPhone");
+    ui::step(5, "Signing the selected IPA for this iPhone");
     let ipa = ipa.ok_or_else(|| Fail::new("siboot has no IPA to sign.", "step 1 got none"))?;
     let signed = sign::sign(&mut session, &ipa.path, &device).await?;
     ui::done(&match &signed.version {
@@ -560,14 +599,22 @@ async fn pipeline(args: &Args) -> Result<()> {
     ui::ok(&format!("{} installed ({})", signed.name, signed.bundle_id));
     ui::done(&format!("installed · {uploaded}"));
 
-    ui::step(7, "Handing SideInstaller the pairing");
-    seed::hand_over(&mut connection, &signed.bundle_id, &pairing_path).await?;
-    ui::done("SideInstaller has the pairing");
+    ui::step(7, "Finishing installation");
+    if receives_pairing(&signed.bundle_id) {
+        ui::activity("handing the pairing to AelSign");
+        seed::hand_over(&mut connection, &signed.bundle_id, &pairing_path).await?;
+        ui::done("AelSign has its pairing");
+    } else {
+        ui::note("Pairing handoff skipped for this IPA.");
+        ui::done("installation complete");
+    }
 
-    // Its own URL scheme (ios-app/Info.plist): the page's button opens it.
-    ui::link("Open SideInstaller", "sideinstaller://");
+    if receives_pairing(&signed.bundle_id) {
+        let label = format!("Open {}", signed.name);
+        ui::link(&label, "sideinstaller://");
+    }
     ui::finish(
-        "SideInstaller is installed",
+        &format!("{} is installed", signed.name),
         &[
             "Open it from your Home Screen. The first time, iOS asks you to trust your Apple \
              Account: Settings › General › VPN & Device Management.",
@@ -645,6 +692,16 @@ mod tests {
         }
     }
 
+    #[test]
+    fn only_known_installer_bundle_ids_receive_the_pairing() {
+        assert!(receives_pairing("com.aelsign.app.ABCDE12345"));
+        assert!(receives_pairing("com.frizzlem.sideinstaller.ABCDE12345"));
+        assert!(!receives_pairing("com.example.otherapp.ABCDE12345"));
+        assert!(!receives_pairing("com.aelsign.app"));
+        assert!(!receives_pairing("com.aelsign.app.ABC"));
+        assert!(!receives_pairing("com.aelsign.app.abcde12345"));
+        assert!(!receives_pairing("com.aelsign.app.ABCDE12345.extra"));
+    }
     #[test]
     fn defaults_run_everything_through_localdevvpn() {
         let args = parse("");

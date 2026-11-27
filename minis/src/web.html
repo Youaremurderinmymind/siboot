@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">
-<title>siboot</title>
+<title>AelSign</title>
 <!--
   siboot's run, served by siboot itself on this iPhone's loopback (src/web.rs)
   and shown in Open Minis's browser. It reads the run as server-sent events
@@ -117,6 +117,11 @@ body:not(.details) .step[data-state=done] .item.ok{display:none}
 .button.quiet{padding:0 12px; background:none; color:var(--text-2)}
 .choices{display:grid; gap:8px; margin-top:14px}
 .button.choice{justify-content:flex-start; width:100%; height:auto; min-height:48px; padding:12px 16px; border-color:var(--hairline); border-radius:var(--r-control); background:var(--raised); color:var(--text); line-height:1.3; text-align:left}
+.ipa-hint{margin-top:10px; font-size:14px; color:var(--text-2)}
+.ipa-progress{margin-top:14px}
+.ipa-progress .track{height:6px}
+.ipa-status{margin-top:8px; font-size:13px; color:var(--muted); overflow-wrap:anywhere}
+.file-input{position:absolute; width:1px; height:1px; opacity:0; overflow:hidden}
 /* What to do elsewhere (pairing in Settings), numbered, before it starts. */
 .ready-steps{margin-top:12px; counter-reset:ready}
 .ready-step{display:flex; gap:10px; padding:5px 0; font-size:15px; line-height:1.4}
@@ -161,7 +166,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
 <body>
 <main>
   <header class="top">
-    <div class="brand"><span class="badge">siboot</span><span class="version" id="version"></span></div>
+    <div class="brand"><span class="badge">AelSign</span><span class="version" id="version"></span></div>
     <button type="button" class="stop" id="stop" hidden>Stop</button>
   </header>
   <h1 class="tagline" id="tagline">Connecting to siboot…</h1>
@@ -173,7 +178,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
   <form class="ask" id="ask" hidden novalidate></form>
   <footer>
     <label class="details-toggle"><input type="checkbox" id="details">Show details</label>
-    <span>A project by Frizzle</span>
+    <span>Based on siboot by FrizzleM</span>
   </footer>
 </main>
 <script>
@@ -423,6 +428,60 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     else afterEl.after(askEl);
   }
 
+  // A local IPA is sent in fixed-size requests, so neither Safari nor the
+  // loopback server has to hold the whole package in memory.
+  async function uploadIpa(file, id, status, fill, track, picker) {
+    const maxSize = 1024 * 1024 * 1024;
+    const chunkSize = 512 * 1024;
+    if (!file.size || file.size > maxSize) {
+      status.textContent = file.size ? "This IPA is larger than the 1 GiB limit." : "This file is empty.";
+      picker.value = "";
+      return;
+    }
+    if (!globalThis.crypto || !crypto.getRandomValues) {
+      status.textContent = "This browser can't securely start an upload. Reopen the page in Minis.";
+      picker.value = "";
+      return;
+    }
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      (byte) => byte.toString(16).padStart(2, "0")).join("");
+    busy(true);
+    status.textContent = "Uploading " + file.name + "…";
+    try {
+      for (let offset = 0; offset < file.size; offset += chunkSize) {
+        const end = Math.min(offset + chunkSize, file.size);
+        const reply = await fetch("upload", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "X-IPA-Question": String(id),
+            "X-IPA-Size": String(file.size),
+            "X-IPA-Offset": String(offset),
+            "X-IPA-Token": token,
+          },
+          body: file.slice(offset, end),
+          cache: "no-store",
+        });
+        if (!reply.ok) {
+          const why = reply.status === 413 ? "The IPA is larger than the 1 GiB limit."
+            : reply.status === 422 ? "That file isn't a valid IPA ZIP. Choose another file."
+            : reply.status === 409 ? "The upload got out of sequence. Choose the file again."
+            : "Upload failed (HTTP " + reply.status + "). Choose the file again.";
+          throw new Error(why);
+        }
+        const percent = Math.floor((end * 100) / file.size);
+        fill.style.width = percent + "%";
+        track.setAttribute("aria-valuenow", String(percent));
+        status.textContent = "Uploading " + file.name + " · " + mb(end) + " of " + mb(file.size) + " MB";
+      }
+      status.textContent = "IPA uploaded; checking the package…";
+    } catch (err) {
+      busy(false);
+      picker.value = "";
+      status.textContent = err instanceof Error ? err.message : "Upload failed. Choose the file again.";
+    }
+  }
+
   function ask(e) {
     asking = e;
     askEl.textContent = "";
@@ -433,7 +492,40 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     const actions = make("div", "actions");
     let focus = null;
 
-    if (e.kind === "text" || e.kind === "secret" || e.kind === "line") {
+    if (e.kind === "ipa") {
+      const picker = make("input", "file-input");
+      picker.type = "file";
+      picker.accept = ".ipa,application/octet-stream";
+      picker.setAttribute("aria-label", "Choose an IPA from Files");
+      const label = make("label", "field");
+      label.append(make("span", "field-label", "Choose a file from Files"));
+      label.append(picker);
+      const choose = button("Choose IPA…", "primary", "button", () => picker.click());
+      const hint = make("p", "ipa-hint", "IPA files up to 1 GiB. Choose apps you trust; the upload stays on this iPhone.");
+      const uploadProgress = make("div", "ipa-progress");
+      uploadProgress.hidden = true;
+      const track = make("div", "track");
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-label", "IPA upload progress");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-valuenow", "0");
+      const fill = make("div", "fill");
+      track.append(fill);
+      uploadProgress.append(track);
+      const status = make("p", "ipa-status");
+      status.setAttribute("role", "status");
+      picker.addEventListener("change", () => {
+        const file = picker.files && picker.files[0];
+        if (!file) return;
+        uploadProgress.hidden = false;
+        fill.style.width = "0%";
+        track.setAttribute("aria-valuenow", "0");
+        uploadIpa(file, e.id, status, fill, track, picker);
+      });
+      askEl.append(label, choose, hint, uploadProgress, status);
+      actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
+    } else if (e.kind === "text" || e.kind === "secret" || e.kind === "line") {
       const field = make("label", "field");
       if (e.label) field.append(make("span", "field-label", e.label));
       const input = make("input", "input");

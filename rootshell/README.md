@@ -4,7 +4,7 @@ siboot's pairing step, as a WASM program for
 [rootshell](https://apps.apple.com/app/rootshell-local-terminal-ssh/id6755794662)
 ("rootshell - Local Terminal & SSH", free, App Store). It pairs the iPhone with
 itself, then hands the pairing file to siboot in Open Minis
-([`../minis`](../minis)), which signs and installs SideInstaller.
+([`../minis`](../minis)), which signs and installs the selected IPA.
 
 Since Open Minis 1.16 (App Store, 2026-11-14), siboot 0.18.0 and later pair the
 iPhone in Minis themselves ([`../minis`](../minis#pairing-in-minis)), so
@@ -20,7 +20,7 @@ its local shell, one line at a time (rootshell doesn't run them joined with
 `&&`):
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/FrizzleM/siboot/main/rootshell/bin/siboot-pair.wasm
+curl -fsSLO https://raw.githubusercontent.com/Youaremurderinmymind/siboot/main/rootshell/bin/siboot-pair.wasm
 ifconfig en0 > ifconfig.txt
 ./siboot-pair.wasm
 ```
@@ -31,7 +31,7 @@ siboot-pair shows in large digits (it also arrives as a notification). Leave
 rootshell running, and in Open Minis's terminal run:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/FrizzleM/siboot/main/minis/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/Youaremurderinmymind/siboot/main/minis/install.sh | sh
 ```
 
 The first time, siboot asks for the transfer code siboot-pair shows (in large

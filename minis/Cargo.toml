@@ -2,7 +2,7 @@
 name = "siboot"
 version = "0.21.0"
 edition = "2021"
-description = "PC-free bootstrap that pairs and installs SideInstaller onto the iPhone it runs on, from Open Minis's Linux shell"
+description = "PC-free IPA signing and installation for Open Minis, with a local Files picker"
 license = "MIT"
 publish = false
 
