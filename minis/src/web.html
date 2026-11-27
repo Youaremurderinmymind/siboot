@@ -528,7 +528,7 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
         uploadProgress.hidden = false;
         fill.style.width = "0%";
         track.setAttribute("aria-valuenow", "0");
-        uploadIpa(file, e.id, status, fill, track, picker);
+        uploadFile("ipa", file, e.id, status, fill, track, picker);
       });
       askEl.append(label, choose, hint, uploadProgress, status);
       actions.append(button("Cancel", "quiet", "button", () => send({ cancel: true })));
