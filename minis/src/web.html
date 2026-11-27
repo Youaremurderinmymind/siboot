@@ -40,8 +40,15 @@ body{margin:0; background:var(--page); color:var(--text); font:400 16px/1.45 var
   radial-gradient(50% 40% at 50% 85%, rgba(229,161,64,.14), transparent 60%);
   animation:drift 22s ease-in-out infinite alternate}
 @keyframes drift{from{transform:translate3d(-2%,-1%,0) rotate(0)}to{transform:translate3d(2%,2%,0) rotate(2deg)}}
-.bg .orb{position:absolute; border-radius:50%; filter:blur(1px); opacity:.5; animation:float linear infinite}
-@keyframes float{from{transform:translateY(110vh) scale(.8)}to{transform:translateY(-12vh) scale(1.15)}}
+/* Snowfall: soft flakes drifting down and swaying side to side. */
+.bg .flake{position:absolute; top:-5vh; border-radius:50%; background:#fff; opacity:0; animation:snow linear infinite}
+@keyframes snow{
+  0%{transform:translate3d(0,-5vh,0) translateX(0); opacity:0}
+  10%{opacity:.7}
+  50%{transform:translate3d(2vw,50vh,0) translateX(1.5vw)}
+  90%{opacity:.5}
+  100%{transform:translate3d(-2vw,105vh,0) translateX(-1vw); opacity:0}
+}
 h1,h2,p,ol,ul{margin:0}
 ol,ul{padding:0; list-style:none}
 button,input{font:inherit; color:inherit}
@@ -295,21 +302,20 @@ footer{display:flex; align-items:center; justify-content:space-between; gap:12px
     deviceEl.hidden = false;
   }
 
-  // Floating particles for the animated background.
-  function makeParticles() {
-    const colors = ["#2f80ff", "#4cc38a", "#e5a140"];
-    for (let i = 0; i < 14; i++) {
-      const orb = make("span", "orb");
-      const size = 4 + Math.random() * 10;
-      orb.style.width = orb.style.height = size + "px";
-      orb.style.left = (Math.random() * 100) + "%";
-      orb.style.background = colors[i % colors.length];
-      orb.style.animationDuration = (12 + Math.random() * 16) + "s";
-      orb.style.animationDelay = (-Math.random() * 20) + "s";
-      bgEl.append(orb);
+  // Snowfall: flakes drifting down at different sizes, speeds and positions.
+  function makeSnow() {
+    for (let i = 0; i < 32; i++) {
+      const flake = make("span", "flake");
+      const size = 3 + Math.random() * 6;
+      flake.style.width = flake.style.height = size + "px";
+      flake.style.left = (Math.random() * 100) + "%";
+      flake.style.opacity = 0.25 + Math.random() * 0.5;
+      flake.style.animationDuration = (9 + Math.random() * 14) + "s";
+      flake.style.animationDelay = (-Math.random() * 20) + "s";
+      bgEl.append(flake);
     }
   }
-  makeParticles();
+  makeSnow();
 
   // One line over the steps, and why it's there: "quiet" (no word from
   // siboot), "unsent" (an answer that didn't reach it) or "done". Each goes
