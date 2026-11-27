@@ -109,9 +109,23 @@ pub fn choose_p12() -> Option<UploadedP12> {
     page()?.choose_p12()
 }
 
+/// Which certificate signing may use, chosen on the local page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CertificateMode {
+    /// Keep siboot's existing behavior: reuse a matching certificate or ask
+    /// Apple for one, prompting before a revocation if Apple's limit is full.
+    Automatic,
+    /// Use only the certificate that matches siboot's already stored private
+    /// key. Do not create or revoke a certificate.
+    ExistingOnly,
+    /// Sign with the user's `.p12` certificate: import its key (it must match
+    /// a certificate on the selected team), then require exactly that identity.
+    OwnP12,
+}
+
 /// Ask the local page whether signing may request a certificate or must use
 /// only a matching certificate whose private key siboot already has stored.
-pub fn choose_certificate_mode() -> Option<crate::sign::CertificateMode> {
+pub fn choose_certificate_mode() -> Option<CertificateMode> {
     let options = certificate_mode_options();
     let selected = page()?.choose(CERTIFICATE_MODE_HELP, &options)?;
     certificate_mode_for_selection(selected)
@@ -127,11 +141,11 @@ fn certificate_mode_options() -> Vec<String> {
     ]
 }
 
-fn certificate_mode_for_selection(index: usize) -> Option<crate::sign::CertificateMode> {
+fn certificate_mode_for_selection(index: usize) -> Option<CertificateMode> {
     match index {
-        0 => Some(crate::sign::CertificateMode::Automatic),
-        1 => Some(crate::sign::CertificateMode::ExistingOnly),
-        2 => Some(crate::sign::CertificateMode::OwnP12),
+        0 => Some(CertificateMode::Automatic),
+        1 => Some(CertificateMode::ExistingOnly),
+        2 => Some(CertificateMode::OwnP12),
         _ => None,
     }
 }
@@ -243,12 +257,6 @@ impl FileKind {
         }
     }
 
-    fn max_label(self) -> &'static str {
-        match self {
-            FileKind::Ipa => "1 GiB",
-            FileKind::P12 => "16 MB",
-        }
-    }
 }
 
 #[derive(Default)]
@@ -385,10 +393,20 @@ impl Server {
 
     /// Ask the page to choose a local IPA to install.
     pub fn choose_ipa(&self) -> Option<UploadedIpa> {
-        self.choose_file(
-            FileKind::Ipa,
-            "Choose an IPA you trust. It will be signed with your Apple Account and installed on this iPhone.",
-        )
+        let answer = self.ask(json!({
+            "kind": "ipa",
+            "question": "Choose an IPA you trust. It will be signed with your Apple Account and installed on this iPhone.",
+        }));
+        if let Some(id) = answer["id"].as_u64() {
+            self.discard_upload(id);
+        }
+        if cancelled(&answer) {
+            return None;
+        }
+        let path = answer["path"].as_str()?;
+        Some(UploadedIpa {
+            path: PathBuf::from(path),
+        })
     }
 
     /// Ask the page for a `.p12` certificate (with its private key) and its
@@ -419,23 +437,6 @@ impl Server {
         Some(UploadedP12 {
             path: PathBuf::from(path),
             password,
-        })
-    }
-
-    fn choose_file(&self, kind: FileKind, question: &str) -> Option<UploadedIpa> {
-        let answer = self.ask(json!({
-            "kind": match kind { FileKind::Ipa => "ipa", FileKind::P12 => "p12" },
-            "question": question,
-        }));
-        if let Some(id) = answer["id"].as_u64() {
-            self.discard_upload(id);
-        }
-        if cancelled(&answer) {
-            return None;
-        }
-        let path = answer["path"].as_str()?;
-        Some(UploadedIpa {
-            path: PathBuf::from(path),
         })
     }
 
@@ -1324,15 +1325,15 @@ mod tests {
         assert!(CERTIFICATE_MODE_HELP.contains("already stored by siboot"));
         assert_eq!(
             certificate_mode_for_selection(0),
-            Some(crate::sign::CertificateMode::Automatic)
+            Some(CertificateMode::Automatic)
         );
         assert_eq!(
             certificate_mode_for_selection(1),
-            Some(crate::sign::CertificateMode::ExistingOnly)
+            Some(CertificateMode::ExistingOnly)
         );
         assert_eq!(
             certificate_mode_for_selection(2),
-            Some(crate::sign::CertificateMode::OwnP12)
+            Some(CertificateMode::OwnP12)
         );
         assert_eq!(certificate_mode_for_selection(3), None);
     }

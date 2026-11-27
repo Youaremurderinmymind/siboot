@@ -519,11 +519,11 @@ async fn pipeline(args: &Args) -> Result<()> {
         web::choose_certificate_mode()
             .ok_or_else(|| Fail::by_user("Stopped before choosing a signing certificate mode."))?
     } else {
-        sign::CertificateMode::Automatic
+        web::CertificateMode::Automatic
     };
     // The page uploads the chosen `.p12` (and its password) now, so it's ready
     // for signing once we've signed in; the temp file is removed at the end.
-    let own_p12 = if certificate_mode == sign::CertificateMode::OwnP12 {
+    let own_p12 = if certificate_mode == web::CertificateMode::OwnP12 {
         Some(
             web::choose_p12()
                 .ok_or_else(|| Fail::by_user("Stopped before choosing a signing certificate."))?,

@@ -11,19 +11,7 @@ use crate::account::Session;
 use crate::fail::{Fail, Result};
 use crate::tunnel::DeviceInfo;
 use crate::ui;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CertificateMode {
-    /// Keep siboot's existing behavior: reuse a matching certificate or ask
-    /// Apple for one, prompting before a revocation if Apple's limit is full.
-    Automatic,
-    /// Use only the certificate that matches siboot's already stored private
-    /// key. Do not create or revoke a certificate.
-    ExistingOnly,
-    /// Sign with the user's `.p12` certificate: import its key (it must match
-    /// a certificate on the selected team), then require exactly that identity.
-    OwnP12,
-}
+pub use crate::web::CertificateMode;
 
 pub struct Signed {
     /// The signed `.app` folder, ready to upload.
