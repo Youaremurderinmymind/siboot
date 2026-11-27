@@ -96,7 +96,7 @@ index 09ffb99..61ebb43 100644
 +    }
 +}
 diff --git a/rust-core/vendor/isideload/src/sideload/sideloader.rs b/rust-core/vendor/isideload/src/sideload/sideloader.rs
-index f2d501a..42e149d 100644
+index f2d501a..0f11b80 100644
 --- a/rust-core/vendor/isideload/src/sideload/sideloader.rs
 +++ b/rust-core/vendor/isideload/src/sideload/sideloader.rs
 @@ -2,6 +2,7 @@ use crate::{
@@ -107,15 +107,18 @@ index f2d501a..42e149d 100644
          developer_session::DeveloperSession,
          devices::DevicesApi,
          teams::{DeveloperTeam, TeamsApi},
-@@ -24,6 +25,7 @@ use futures_util::future::{try_join, try_join3, try_join_all};
+@@ -24,6 +25,10 @@ use futures_util::future::{try_join, try_join3, try_join_all};
  #[cfg(feature = "install")]
  use idevice::provider::IdeviceProvider;
  use rootcause::{option_ext::OptionExt, prelude::*};
-+use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey};
++use rsa::{
++    RsaPrivateKey,
++    pkcs8::{DecodePrivateKey, EncodePrivateKey},
++};
  use tracing::{info, warn};
  
  /// Whether [`Sideloader::sign_app`] enables the Increased Memory Limit
-@@ -51,6 +53,25 @@ impl MemoryLimit {
+@@ -51,6 +56,25 @@ impl MemoryLimit {
      }
  }
  
@@ -141,7 +144,7 @@ index f2d501a..42e149d 100644
  /// Whether `app` is an app store that refreshes itself. Once Apple expires its
  /// App ID (7 days after it was registered, on a free team), it registers a new
  /// one and refreshes by installing that App ID's profiles, without signing
-@@ -75,6 +96,7 @@ pub struct Sideloader {
+@@ -75,6 +99,7 @@ pub struct Sideloader {
      machine_name: String,
      apple_email: String,
      max_certs_behavior: MaxCertsBehavior,
@@ -149,7 +152,7 @@ index f2d501a..42e149d 100644
      //extensions_behavior: ExtensionsBehavior,
      // Only `install_app` reads it.
      #[cfg_attr(not(feature = "install"), allow(dead_code))]
-@@ -103,6 +125,7 @@ impl Sideloader {
+@@ -103,6 +128,7 @@ impl Sideloader {
              machine_name,
              apple_email,
              max_certs_behavior,
@@ -157,7 +160,7 @@ index f2d501a..42e149d 100644
              //extensions_behavior,
              delete_app_after_install,
              team: None,
-@@ -159,7 +182,20 @@ impl Sideloader {
+@@ -159,7 +185,20 @@ impl Sideloader {
          };
  
          let certificate = async {
@@ -179,7 +182,7 @@ index f2d501a..42e149d 100644
                  CertificateIdentity::retrieve(
                      &self.machine_name,
                      &self.apple_email,
-@@ -169,8 +205,9 @@ impl Sideloader {
+@@ -169,8 +208,9 @@ impl Sideloader {
                      &self.max_certs_behavior,
                  )
                  .await
@@ -191,7 +194,7 @@ index f2d501a..42e149d 100644
          };
  
          // Extracting the archive is blocking work, so it runs off this task and
-@@ -397,6 +434,76 @@ impl Sideloader {
+@@ -397,6 +437,76 @@ impl Sideloader {
          self.team = Some(team);
      }
  
@@ -268,7 +271,7 @@ index f2d501a..42e149d 100644
      pub fn get_dev_session(&mut self) -> &mut DeveloperSession {
          &mut self.dev_session
      }
-@@ -408,7 +515,15 @@ impl Sideloader {
+@@ -408,7 +518,15 @@ impl Sideloader {
  
  #[cfg(test)]
  mod tests {
