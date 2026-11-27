@@ -45,7 +45,12 @@ IPA is checked and used for signing; files up to 1 GiB are sent to the local
 installer in 512 KiB chunks. With `--terminal`, or with an explicit
 `--ipa PATH|URL`, the existing command-line behavior is unchanged.
 
-In the web flow, the page also asks for the certificate policy. **Automatic**
+In the web flow, the page first asks what to install: **ESign**, **Ksign**, or
+**an IPA from Files**. ESign and Ksign are downloaded from their official
+GitHub releases, then signed and installed exactly like a local IPA. The
+signer choices are included for convenience; review what you install.
+
+The page then asks for the certificate policy. **Automatic**
 keeps the usual behavior and may request a development certificate (asking
 before any revocation). **Existing siboot key only** fails unless the account's
 stored private key already matches a certificate on the selected Apple team;

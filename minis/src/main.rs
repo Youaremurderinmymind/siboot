@@ -504,17 +504,25 @@ async fn pipeline(args: &Args) -> Result<()> {
             ui::plan(&names, DEVMODE_STAGES);
         }
     }
-    // In the web workflow, pick a local IPA before step 1 starts. `--ipa`
-    // remains an explicit override, and terminal runs keep their old default.
-    let uploaded_ipa =
-        if args.command == Command::All && args.ipa.is_none() && web::page().is_some() {
-            match web::choose_ipa() {
-                Some(upload) => Some(upload),
-                None => return Err(Fail::by_user("Stopped before choosing an IPA.")),
-            }
-        } else {
-            None
-        };
+    // In the web workflow, choose what to install first: a known signer (which
+    // downloads by URL) or the user's own IPA from Files. `--ipa` still wins.
+    let ipa_choice = if args.command == Command::All && args.ipa.is_none() && web::page().is_some()
+    {
+        match web::choose_ipa_source() {
+            Some(choice) => Some(choice),
+            None => return Err(Fail::by_user("Stopped before choosing an IPA.")),
+        }
+    } else {
+        None
+    };
+    let (uploaded_ipa, ipa_url) = match ipa_choice {
+        Some(web::IpaChoice::Upload(upload)) => (Some(upload), None),
+        Some(web::IpaChoice::Download { url, name }) => {
+            ui::status(&format!("preparing {name} for download"));
+            (None, Some((name, url)))
+        }
+        None => (None, None),
+    };
     let certificate_mode = if args.command == Command::All && web::page().is_some() {
         web::choose_certificate_mode()
             .ok_or_else(|| Fail::by_user("Stopped before choosing a signing certificate mode."))?
@@ -531,12 +539,16 @@ async fn pipeline(args: &Args) -> Result<()> {
     } else {
         None
     };
-    let effective_args = match &uploaded_ipa {
-        Some(upload) => Args {
+    let effective_args = match (&uploaded_ipa, ipa_url) {
+        (Some(upload), _) => Args {
             ipa: Some(upload.path.to_string_lossy().into_owned()),
             ..args.clone()
         },
-        None => args.clone(),
+        (_, Some((_, url))) => Args {
+            ipa: Some(url.to_string()),
+            ..args.clone()
+        },
+        (None, None) => args.clone(),
     };
     let args = &effective_args;
 

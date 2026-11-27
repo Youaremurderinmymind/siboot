@@ -104,6 +104,25 @@ pub fn choose_ipa() -> Option<UploadedIpa> {
     page()?.choose_ipa()
 }
 
+/// What the user wants to install: one of the official signer releases, or an
+/// IPA they pick from Files. `Download` URLs are fetched by the normal
+/// `--ipa URL` path in `download.rs`.
+pub enum IpaChoice {
+    Download { url: &'static str, name: &'static str },
+    Upload(UploadedIpa),
+}
+
+pub const ESIGN_IPA_URL: &str =
+    "https://github.com/Esign-ipa/ESign-ipa-signer/releases/download/Esign/esign.ipa";
+pub const KSIGN_IPA_URL: &str =
+    "https://github.com/Nyasami/Ksign/releases/download/v1.6/Ksign.ipa";
+
+/// Ask the local page which IPA to install first: ESign, Ksign, or the user's
+/// own `.ipa` from Files.
+pub fn choose_ipa_source() -> Option<IpaChoice> {
+    page()?.choose_ipa_source()
+}
+
 /// Ask the page for a `.p12` certificate and its password, if it has a page.
 pub fn choose_p12() -> Option<UploadedP12> {
     page()?.choose_p12()
@@ -407,6 +426,28 @@ impl Server {
         Some(UploadedIpa {
             path: PathBuf::from(path),
         })
+    }
+
+    /// Ask which IPA to install: a known signer release, or the user's own.
+    pub fn choose_ipa_source(&self) -> Option<IpaChoice> {
+        let options = vec![
+            "ESign — download its latest signer IPA".to_string(),
+            "Ksign — download its latest signer IPA".to_string(),
+            "Choose an .ipa from Files".to_string(),
+        ];
+        let index = self.choose("Install an app. Pick a signer to download, or choose your own IPA from Files.", &options)?;
+        match index {
+            0 => Some(IpaChoice::Download {
+                url: ESIGN_IPA_URL,
+                name: "ESign",
+            }),
+            1 => Some(IpaChoice::Download {
+                url: KSIGN_IPA_URL,
+                name: "Ksign",
+            }),
+            2 => self.choose_ipa().map(IpaChoice::Upload),
+            _ => None,
+        }
     }
 
     /// Ask the page for a `.p12` certificate (with its private key) and its
@@ -1311,6 +1352,20 @@ mod tests {
                 return event;
             }
         }
+    }
+
+    #[test]
+    fn ipa_source_offers_signers_and_files() {
+        let options = vec![
+            "ESign — download its latest signer IPA".to_string(),
+            "Ksign — download its latest signer IPA".to_string(),
+            "Choose an .ipa from Files".to_string(),
+        ];
+        assert!(options[0].contains("ESign"));
+        assert!(options[1].contains("Ksign"));
+        assert!(options[2].contains("Files"));
+        assert!(ESIGN_IPA_URL.ends_with("esign.ipa"));
+        assert!(KSIGN_IPA_URL.ends_with("Ksign.ipa"));
     }
 
     #[test]
