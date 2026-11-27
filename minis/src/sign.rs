@@ -116,7 +116,7 @@ mod tests {
             "No existing development certificate matches the private key already stored",
         );
         assert!(advice.contains("matching private key"));
-        assert!(advice.contains("did not create or revoke"));
+        assert!(advice.contains("nothing was created, imported, or revoked"));
     }
 
     #[test]
