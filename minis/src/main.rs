@@ -91,6 +91,8 @@ pub enum Command {
     Connect,
     /// Steps 1-3, then show Developer Mode in Settings (or turn it on).
     DeveloperMode,
+    /// Sign in and export this account's signing certificate as a `.p12`.
+    ExportCert,
 }
 
 #[derive(Clone)]
@@ -111,6 +113,9 @@ pub struct Args {
     pub apple_id: Option<String>,
     pub ipa: Option<String>,
     pub anisette: Option<String>,
+    /// With `export-cert`: where to write the `.p12`, and the password to
+    /// encrypt it with (else it's asked on the terminal).
+    pub out: Option<PathBuf>,
 }
 
 impl Args {
@@ -161,6 +166,7 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> std::result::Result<Par
         apple_id: None,
         ipa: None,
         anisette: None,
+        out: None,
     };
     let mut argv = argv.into_iter();
     let mut command_seen = false;
@@ -191,11 +197,13 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> std::result::Result<Par
             "--ipa" => args.ipa = Some(value("--ipa")?),
             "--anisette" => args.anisette = Some(value("--anisette")?),
             "--turn-on" => args.turn_on = true,
-            "check" | "connect" | "developer-mode" if !command_seen => {
+            "--out" => args.out = Some(PathBuf::from(value("--out")?)),
+            "check" | "connect" | "developer-mode" | "export-cert" if !command_seen => {
                 command_seen = true;
                 args.command = match arg.as_str() {
                     "check" => Command::Check,
                     "connect" => Command::Connect,
+                    "export-cert" => Command::ExportCert,
                     _ => Command::DeveloperMode,
                 };
             }
@@ -243,6 +251,12 @@ Open Minis, with your own Apple Account.
       asking: the iPhone restarts. iOS allows
       that only without a passcode; with one,
       siboot shows the switch instead.
+  {exportcert}
+      Sign in and write this account's signing
+      certificate as a .p12 (key + certificate),
+      protected by a password you choose. --out
+      picks the path; SIBOOT_P12_PASSWORD supplies
+      the password instead of the prompt.
 
 {options}
   {apple_id}
@@ -256,6 +270,9 @@ Open Minis, with your own Apple Account.
       Use this IPA instead of the latest release.
       In the web page, choose from Files when
       this option is omitted.
+  {out}
+      With export-cert: where to write the .p12
+      (default ~/.siboot/signing-certificate.p12).
   {anisette}
       Sign in through this anisette server only.
   {turn_on}
@@ -301,8 +318,10 @@ Open Minis, with your own Apple Account.
         check = flag("check"),
         connect = flag("connect"),
         devmode = flag("developer-mode"),
+        exportcert = flag("export-cert"),
         apple_id = flag("--apple-id EMAIL"),
         ipa = flag("--ipa PATH|URL"),
+        out = flag("--out PATH"),
         anisette = flag("--anisette URL"),
         turn_on = flag("--turn-on"),
         device_ip = flag("--device-ip IP"),
@@ -541,6 +560,7 @@ async fn pipeline(args: &Args) -> Result<()> {
             names.push(DEVMODE_NAME);
             ui::plan(&names, DEVMODE_STAGES);
         }
+        Command::ExportCert => ui::plan(&STEP_NAMES[..1], STAGES),
     }
     // In the web workflow, choose what to install first: a known signer (which
     // downloads by URL) or the user's own IPA from Files. `--ipa` still wins.
@@ -608,6 +628,9 @@ async fn pipeline(args: &Args) -> Result<()> {
     if args.command == Command::Check {
         ui::finish("Ready", &["Run siboot to install SideInstaller."]);
         return Ok(());
+    }
+    if args.command == Command::ExportCert {
+        return export_certificate(args).await;
     }
     // The rest dials where the iPhone answered, which isn't the port asked
     // for when its pairing service started on another one.
@@ -720,6 +743,66 @@ async fn pipeline(args: &Args) -> Result<()> {
             "Open it from your Home Screen. The first time, iOS asks you to trust your Apple \
              Account: Settings › General › VPN & Device Management.",
             team::lasts(session.kind, session.first),
+        ],
+    );
+    Ok(())
+}
+
+/// `siboot export-cert`: sign in, then write this account's signing key and
+/// its certificate as a `.p12` the user can take elsewhere. The key never
+/// leaves the device except in this file, whose password the user chooses.
+async fn export_certificate(args: &Args) -> Result<()> {
+    ui::step(2, "Signing in to your Apple Account");
+    let mut session = account::sign_in(args).await?;
+    ui::done(&session.team);
+
+    let out = args
+        .out
+        .clone()
+        .unwrap_or_else(|| args.home.join("signing-certificate.p12"));
+    let password = std::env::var("SIBOOT_P12_PASSWORD")
+        .ok()
+        .filter(|p| !p.is_empty())
+        .or_else(|| {
+            ui::ask_secret(
+                "choose a password for the exported .p12",
+                "Password",
+                "it protects the private key inside",
+                "Password for the .p12 (not shown): ",
+            )
+            .ok()
+            .flatten()
+        })
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| Fail::by_user("No password given for the .p12."))?;
+
+    ui::activity("exporting the signing certificate");
+    let bytes = session
+        .sideloader
+        .export_p12(&password)
+        .await
+        .map_err(|e| {
+            let text = crate::error_text::report_text(&e);
+            Fail::new(
+                "Couldn't export this account's certificate. Sign in and sign an app once first, so Apple issues a certificate for this key.",
+                text,
+            )
+        })?;
+
+    std::fs::write(&out, &bytes)
+        .map_err(|e| Fail::new(format!("Couldn't write {}.", out.display()), e.to_string()))?;
+    // Only the owner may read the private key.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o600));
+    }
+    ui::ok(&format!("wrote {} ({} bytes)", out.display(), bytes.len()));
+    ui::finish(
+        "Certificate exported",
+        &[
+            "The .p12 holds your signing key and certificate, protected by the password you chose. Keep it private.",
+            "It works with tools that accept a .p12 (AltStore, SideStore, ESign, Ksign and others).",
         ],
     );
     Ok(())

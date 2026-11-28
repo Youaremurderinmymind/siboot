@@ -96,7 +96,7 @@ index 09ffb99..61ebb43 100644
 +    }
 +}
 diff --git a/rust-core/vendor/isideload/src/sideload/sideloader.rs b/rust-core/vendor/isideload/src/sideload/sideloader.rs
-index f2d501a..0f11b80 100644
+index f2d501a..b890b5e 100644
 --- a/rust-core/vendor/isideload/src/sideload/sideloader.rs
 +++ b/rust-core/vendor/isideload/src/sideload/sideloader.rs
 @@ -2,6 +2,7 @@ use crate::{
@@ -194,7 +194,7 @@ index f2d501a..0f11b80 100644
          };
  
          // Extracting the archive is blocking work, so it runs off this task and
-@@ -397,6 +437,76 @@ impl Sideloader {
+@@ -397,6 +437,100 @@ impl Sideloader {
          self.team = Some(team);
      }
  
@@ -268,10 +268,34 @@ index f2d501a..0f11b80 100644
 +        Ok(cert)
 +    }
 +
++    /// Export this account's signing identity as a PKCS#12 archive, encrypted
++    /// with `password`, for use with another tool. Needs a matching certificate
++    /// on the selected team; the private key stays on this device otherwise.
++    pub async fn export_p12(&mut self, password: &str) -> Result<Vec<u8>, Report> {
++        let team = match self.team.clone() {
++            Some(team) => team,
++            None => self.get_team().await?,
++        };
++        let identity = CertificateIdentity::retrieve_existing(
++            &self.apple_email,
++            &mut self.dev_session,
++            &team,
++            self.storage.as_ref(),
++        )
++        .await
++        .context("Failed to look up this account's signing identity")?
++        .ok_or_else(|| {
++            report!(
++                "No signing certificate on this Apple team matches the key stored for this account; sign something once first, or import a .p12"
++            )
++        })?;
++        identity.as_p12(password).await
++    }
++
      pub fn get_dev_session(&mut self) -> &mut DeveloperSession {
          &mut self.dev_session
      }
-@@ -408,7 +518,15 @@ impl Sideloader {
+@@ -408,7 +542,15 @@ impl Sideloader {
  
  #[cfg(test)]
  mod tests {
