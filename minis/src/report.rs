@@ -62,6 +62,7 @@ fn compose(args: &Args) -> String {
         Command::Check => "check",
         Command::Connect => "connect",
         Command::DeveloperMode => "developer-mode",
+        Command::ExportCert => "export-cert",
     };
     let mut out = format!("siboot {VERSION} log · {command}");
     let flags = flags_given(std::env::args().skip(1));
